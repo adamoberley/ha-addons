@@ -8,7 +8,7 @@ you control.
 
 | Old art-changer | Frame Gallery |
 | --- | --- |
-| Random **nudes** from Google Art | Public-domain museum art + keyword blocklist + a search to shape the collection |
+| **Unpredictable, sometimes mature** images from Google Art | Public-domain museum art + a keyword content filter + a search to shape the collection |
 | The **same pieces** over and over | Remembers the last *N* shown; never repeats until the pool is exhausted |
 | Uploads **pile up** in the art library | Upload → select → **delete the previous one**; one image, swapped in place |
 | Needed an **automation** to run | A long-running service with its own interval |
@@ -46,7 +46,7 @@ layer is a plug-in.
 | --- | --- | --- |
 | **Art search** (`query`) | *(blank)* | Free-text search that shapes the whole collection: `landscape`, `impressionism`, `ukiyo-e`, `Monet`… Blank = all public-domain works. |
 | **Public domain only** | on | Only show CC0 works (recommended — clean licensing). |
-| **Excluded keywords** | `nude, naked, nudity, erotic, explicit` | Any work whose title/artist/tags match is skipped. Blank to disable. |
+| **Excluded keywords** | *(mature-content terms)* | Comma-separated; any work whose title/artist/tags match a listed term is skipped. Blank to disable. |
 | **Change interval** | 60 | Minutes between pieces. |
 | **Fit** | matte | `matte` frames the whole work on a mat (nothing cropped); `crop` fills the panel and trims the edges. |
 | **Mat color** | `#141414` | Background behind matted art (hex). Dark avoids glare at night. |
@@ -69,7 +69,7 @@ Three layers, all under your control:
   department, classification, subject) matches a word you list.
 
 This is metadata-based, not a content rating, so it isn't infallible on its own —
-but combining a focused `query` with the keyword blocklist makes a stray nude
+but combining a focused `query` with the keyword filter makes mature imagery
 extremely unlikely. Tighten `query` if you want a guaranteed-tame collection.
 
 ## Troubleshooting

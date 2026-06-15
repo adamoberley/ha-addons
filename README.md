@@ -16,7 +16,7 @@ the things that made them frustrating:
 
 | The old way | Frame Gallery |
 | --- | --- |
-| Random **nudes** from Google Art ambushing the living room | Public-domain museum art, **public-domain-only** + a **keyword blocklist**, and a search to shape the collection |
+| **Unpredictable, sometimes not-family-friendly** images from Google Art | Public-domain museum art you shape with a **search** + a **keyword content filter** |
 | The **same few pieces** on repeat | Remembers the last *N* shown and cycles — no re-rolling |
 | Uploads **pile up** in the TV's art library forever | Each piece **replaces** the last (upload → select → delete) |
 | Needed a separate **automation** to fire it | A long-running service with its **own interval** |
@@ -45,18 +45,19 @@ Usually **no configuration is needed** — it auto-discovers your Frame. Tweak t
 look and the collection from the **Configuration** tab; full reference in
 [`frame_gallery/DOCS.md`](frame_gallery/DOCS.md).
 
-## Shaping the collection (and keeping it safe)
+## Shaping the collection (and keeping it family-friendly)
 
 - **`query`** — a free-text search that defines the whole gallery, e.g.
   `landscape`, `impressionism`, `ukiyo-e`, `still life`, `Monet`. Blank pulls
   from the entire public-domain catalogue.
 - **`public_domain_only`** (default on) — only CC0 works, so the licensing is
   always clean for display.
-- **`exclude_keywords`** (default `nude, naked, nudity, erotic, explicit`) — any
-  work whose title/artist/department/subject tags match is skipped.
+- **`exclude_keywords`** — a content filter: any work whose title/artist/subject
+  tags match a listed term is skipped. Ships with sensible mature-content
+  defaults; edit to taste.
 
-Together these are the real fix for "a nude ambushed my kids": you choose the
-themes *and* veto by keyword, instead of trusting a black box.
+Choosing a focused `query` *and* keeping the keyword filter on lets you curate a
+room-appropriate collection, rather than trusting an opaque "random art" feed.
 
 ## How it works
 

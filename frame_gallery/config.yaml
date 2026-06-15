@@ -4,7 +4,7 @@
 # open museum APIs, fits it to your Frame TV's panel, and pushes it to Art Mode
 # - replacing the previous upload in place (the art library never piles up) and
 # never repeating recent pieces. No automation needed; no Google/Bing; content
-# is filterable so a stray nude never lands on the wall.
+# is filterable to keep it family-friendly.
 name: Frame Gallery
 version: "0.1.0"
 slug: frame_gallery
