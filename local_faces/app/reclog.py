@@ -1,7 +1,9 @@
-"""Recent-recognition log: name, score, and a snapshot thumbnail, kept in /data.
+"""Recent-recognition log: name, score, snapshot, and the embedding, kept in /data.
 
-This is the "review later" history shown on the dashboard. It's capped so the
-file stays small; thumbnails are the aligned 112x112 crops, base64-encoded.
+This is the "review later" history shown on the dashboard. Each entry also keeps
+the face embedding (and the model it came from), so an unknown sighting can be
+named straight from the log - that enrolls the stored face without re-capturing.
+The list is capped so the file stays small.
 """
 from __future__ import annotations
 
@@ -9,6 +11,7 @@ import base64
 import json
 import logging
 import os
+import secrets
 import threading
 import time
 
@@ -41,18 +44,42 @@ class RecognitionLog:
         except OSError as exc:
             log.warning("could not persist log: %s", exc)
 
-    def add(self, name: str, score: float, unknown: bool, thumb: bytes) -> None:
+    def add(self, name: str, score: float, unknown: bool, thumb: bytes,
+            embedding, model: str) -> None:
         with self._lock:
             self.events.insert(0, {
+                "id": secrets.token_hex(6),
                 "ts": time.time(),
                 "name": name,
                 "score": round(float(score), 3),
                 "unknown": unknown,
                 "thumb": base64.b64encode(thumb).decode("ascii") if thumb else "",
+                "emb": [round(float(v), 6) for v in embedding],
+                "model": model,
             })
             del self.events[CAP:]
             self._save()
 
     def recent(self) -> list[dict]:
+        """Display view for the dashboard - omits the bulky embedding."""
         with self._lock:
-            return list(self.events)
+            return [
+                {k: e[k] for k in ("id", "ts", "name", "score", "unknown", "thumb")}
+                for e in self.events
+            ]
+
+    def get(self, event_id: str) -> dict | None:
+        with self._lock:
+            for e in self.events:
+                if e.get("id") == event_id:
+                    return dict(e)
+        return None
+
+    def relabel(self, event_id: str, name: str) -> None:
+        with self._lock:
+            for e in self.events:
+                if e.get("id") == event_id:
+                    e["name"] = name
+                    e["unknown"] = False
+                    self._save()
+                    return
