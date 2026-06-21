@@ -63,10 +63,16 @@ model — `sface` is good at `0.363`; for `mobilefacenet_w600k` start lower (aro
    - `stream` mode: an RTSP URL like `rtsp://user:pass@192.168.1.50/stream`, or
      an HTTP/MJPEG stream.
    - `snapshot` mode: a still-image URL that returns a fresh JPEG per request.
-3. **Start the add-on** and open it (sidebar → **Local Faces**).
-4. **Enroll** each person: type a name, then **Capture from camera** (best — uses
-   the real camera angle) or **Upload photo**. Add a few samples per person.
-5. Recognized faces now appear in the **Recent recognitions** list and on the
+3. **Start the add-on** and open it (sidebar → **Local Faces**). The dashboard
+   shows a live view, who's enrolled, and recent sightings.
+4. **Enroll** each person, two ways:
+   - **Capture or upload:** type a name, hit **Capture from camera** (best — uses
+     the real camera angle) or **Upload photo**, check the captured face, then
+     **Save**. Add a few angles per person.
+   - **Name from the log:** when an unrecognized face shows up under **Recent
+     sightings**, hit **Name**, type who it is, and save — that face is enrolled
+     and recognized from then on. No re-capture needed.
+5. Recognized faces now appear under **Recent sightings** and on the
    `sensor.recognized_name` entity.
 
 ## What you get
@@ -76,8 +82,8 @@ model — `sface` is good at `0.363`; for `mobilefacenet_w600k` start lower (aro
   `timestamp` attributes. Automate freely: unlock for known people, alert on
   unknown, announce arrivals.
 - **Push notification** — optional ping via any HA notify service.
-- **Log** — name, confidence, and a snapshot thumbnail for every recognition,
-  in the dashboard.
+- **Sightings log** — name, confidence, and a snapshot thumbnail for every
+  recognition, in the dashboard. Unknown faces can be named in place to enroll them.
 
 ## Tuning
 

@@ -1,5 +1,19 @@
 # Changelog
 
+## Local Faces 0.3.0 — 2026-06-21
+
+- **Redesigned dashboard** — a "porch-lantern" console: a live MJPEG viewport as
+  the centerpiece that glows amber when a known face is present and coral for an
+  unknown one, with a monospace-label instrument styling, light/dark themes, and
+  a responsive layout that works on the HA mobile app.
+- **Smooth live view** — replaced the polled still image with an MJPEG stream.
+- **Capture → confirm → save enrollment** — you now see the captured face before
+  naming it, with proper busy states (no accidental double-enrollments).
+- **Name from the log** — tap an unknown face in the sightings list and name it to
+  enroll it on the spot; the log now stores each sighting's embedding for this.
+- **Security fix** — enrolled names are rendered as text (no longer interpolated
+  into HTML), closing a stored-XSS vector via a crafted name.
+
 ## Local Faces 0.2.0 — 2026-06-21
 
 - **Pluggable recognition model.** New `recognition_model` option: keep the
