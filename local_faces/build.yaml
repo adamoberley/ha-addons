@@ -1,0 +1,10 @@
+# Plain Python base (Debian slim). opencv-python-headless and numpy ship
+# manylinux wheels for aarch64/amd64, so there's nothing to compile; we only add
+# the couple of shared libs the OpenCV wheel loads at runtime.
+build_from:
+  aarch64: python:3.12-slim
+  amd64: python:3.12-slim
+
+labels:
+  org.opencontainers.image.title: "Local Faces"
+  org.opencontainers.image.source: "https://github.com/adamoberley/ha-frame-gallery"

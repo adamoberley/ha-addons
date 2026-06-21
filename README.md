@@ -45,6 +45,23 @@ Usually **no configuration is needed** — it auto-discovers your Frame. Tweak t
 look and the collection from the **Configuration** tab; full reference in
 [`frame_gallery/DOCS.md`](frame_gallery/DOCS.md).
 
+## Also in this repository: Local Faces
+
+A second, independent add-on: **[Local Faces](local_faces/DOCS.md)** — open-source,
+on-device **face recognition** for Home Assistant. Point it at a camera, enroll a
+few people from its dashboard, and recognized names show up in HA as a
+`sensor.recognized_name` you can automate off (unlock for known people, alert on
+unknown, announce arrivals).
+
+- **On-device, CPU-only** — light enough for a Raspberry Pi 4/5; no GPU, no cloud.
+- **Open models** — YuNet (detection) + SFace, a MobileFaceNet-style embedder
+  (recognition), both Apache-2.0 from the OpenCV Zoo, run via OpenCV's bundled DNN.
+- **Local by default** — recognition, enrollment, and the log stay on the box;
+  only an optional push notification ever leaves your network.
+
+Install it from the same repository (it appears alongside Frame Gallery). Full
+setup and tuning in [`local_faces/DOCS.md`](local_faces/DOCS.md).
+
 ## Shaping the collection (and keeping it family-friendly)
 
 - **`query`** — a free-text search that defines the whole gallery, e.g.

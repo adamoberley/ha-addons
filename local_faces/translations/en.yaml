@@ -1,0 +1,70 @@
+# Labels + help shown on the add-on's Configuration tab.
+configuration:
+  stream_url:
+    name: Camera URL
+    description: >-
+      Your camera's stream. For "stream" mode use an RTSP URL
+      (rtsp://user:pass@camera-ip/stream) or an HTTP/MJPEG stream. For "snapshot"
+      mode use a still-image URL that returns a fresh JPEG each request. Tip: most
+      HA camera integrations expose one of these.
+  camera_mode:
+    name: Camera mode
+    description: >-
+      "stream" reads a continuous RTSP/HTTP feed (lowest latency). "snapshot"
+      polls a still-image URL every interval (lighter, good for cameras that only
+      offer a snapshot endpoint).
+  mode:
+    name: Speed vs accuracy
+    description: >-
+      "fast" downscales more before detection (lightest on a Pi); "accurate"
+      keeps more detail to catch smaller or farther faces. Recognition itself
+      always runs on the full-resolution aligned face.
+  detect_interval:
+    name: Detection interval (seconds)
+    description: How often a frame is analyzed. 1 second is plenty for a doorway.
+  recognition_threshold:
+    name: Match threshold
+    description: >-
+      Cosine similarity required to count as a match (0.363 is a good default).
+      Raise it if strangers get matched to someone; lower it if known people are
+      missed.
+  min_face_size:
+    name: Minimum face size (px)
+    description: >-
+      Ignore faces shorter than this many pixels. Raising it skips tiny, distant
+      faces that cause false detections.
+  cooldown_seconds:
+    name: Re-trigger cooldown (seconds)
+    description: >-
+      After someone is seen, wait this long before logging/notifying that same
+      identity again - stops a lingering face from spamming you.
+  notify_service:
+    name: Notify service
+    description: >-
+      Home Assistant notify service for a push on a match, e.g.
+      "notify.mobile_app_pixel". Leave blank to disable notifications.
+  notify_unknown:
+    name: Notify on unknown faces
+    description: Also send a notification when an unrecognized face is seen.
+  enable_mqtt:
+    name: Publish HA sensor (MQTT)
+    description: >-
+      Expose a "Recognized Name" sensor to Home Assistant via MQTT discovery so
+      you can automate off it. Requires the Mosquitto broker add-on (or your own).
+  mqtt_host:
+    name: MQTT host
+    description: >-
+      Leave blank to auto-detect the Mosquitto broker add-on. Set it only to use
+      an external broker.
+  mqtt_port:
+    name: MQTT port
+    description: MQTT broker port (default 1883). Only used with a manual host.
+  mqtt_username:
+    name: MQTT username
+    description: Only used with a manual MQTT host.
+  mqtt_password:
+    name: MQTT password
+    description: Only used with a manual MQTT host.
+  log_level:
+    name: Log level
+    description: Set to debug to troubleshoot the camera, models, or MQTT connection.

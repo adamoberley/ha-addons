@@ -1,6 +1,27 @@
 # Changelog
 
-## 0.1.0 — 2026-06-14
+## Local Faces 0.1.0 — 2026-06-21
+
+First release of a second add-on in this repository.
+
+- **On-device, open-source face recognition** for Home Assistant: pulls frames
+  from an RTSP/HTTP stream (or polled snapshot URL), detects faces, and matches
+  them against people you enroll — all on the CPU, light enough for a Pi 4/5.
+- **Open models:** YuNet detector + SFace embedder (Apache-2.0, OpenCV Zoo) via
+  OpenCV's bundled DNN — the open counterpart to UltraFace + MobileFaceNet.
+  Downloaded once to `/data/models` on first start.
+- **Enrollment dashboard (ingress):** add people by capturing from the live
+  camera or uploading a photo; live annotated view; a recognition log with
+  snapshot thumbnails.
+- **HA integration:** publishes a `Recognized Name` sensor via MQTT discovery
+  (auto-detects the Mosquitto broker add-on); optional push notification via any
+  HA notify service, with a per-identity cooldown.
+- **Local by default:** recognition, enrollment, and the log never leave the box;
+  only a notification can.
+- Tunable: Fast/Balanced/Accurate processing size, match threshold, minimum face
+  size, and detection interval.
+
+## Frame Gallery 0.1.0 — 2026-06-14
 
 First release.
 
