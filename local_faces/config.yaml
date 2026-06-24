@@ -6,7 +6,7 @@
 # HA as a sensor over MQTT; recognition, enrollment, and the log never leave the
 # box (only an optional push notification does).
 name: Local Faces
-version: "0.3.2"
+version: "0.4.0"
 slug: local_faces
 description: >-
   On-device, open-source face recognition. Enroll people from a dashboard;
@@ -36,6 +36,7 @@ homeassistant_api: true
 hassio_api: true
 
 options:
+  cameras: []
   stream_url: ""
   camera_mode: "stream"
   preview_aspect: "auto"
@@ -56,8 +57,15 @@ options:
   log_level: "info"
 
 schema:
+  # One entry per camera (name + URL + mode); enrollments are shared across all
+  # of them and each gets its own sensor. Leave empty to use the single Camera URL.
+  cameras:
+    - name: str
+      stream_url: str
+      camera_mode: "list(stream|snapshot)"
   # Camera URL. RTSP (rtsp://user:pass@cam/stream) or an HTTP/MJPEG stream for
-  # "stream" mode; a still-image snapshot URL for "snapshot" mode.
+  # "stream" mode; a still-image snapshot URL for "snapshot" mode. Single-camera
+  # fallback, used only when no cameras are listed above.
   stream_url: "str?"
   camera_mode: "list(stream|snapshot)"
   # Dashboard preview shape. "auto" matches the camera's real frame (best for a

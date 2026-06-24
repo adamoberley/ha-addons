@@ -1,10 +1,12 @@
-"""Publish the "Recognized Name" sensor to Home Assistant over MQTT discovery.
+"""Publish a "Recognized Name" sensor per camera (plus an aggregate) over MQTT.
 
 Broker details come from the Supervisor's MQTT service automatically (so the
-Mosquitto add-on just works), or from the add-on options if you run your own
-broker. We publish a retained discovery config once, then the recognized name as
-state with score/timestamp attributes. This is the only thing that creates an HA
-entity - if MQTT isn't available the add-on still runs (dashboard, log, notify).
+Mosquitto add-on just works), or from the add-on options for an external broker.
+Each camera gets sensor.local_faces_<slug>; sensor.local_faces_recognized_name is
+kept as an "anyone known, any camera" aggregate for backward compatibility. We
+publish retained discovery once, then state per camera. This is the only thing
+that creates HA entities - if MQTT isn't available the add-on still runs
+(dashboard, log, notify).
 """
 from __future__ import annotations
 
@@ -17,15 +19,31 @@ import requests
 log = logging.getLogger("local-faces.mqtt")
 
 NODE = "local_faces"
-DISCOVERY = f"homeassistant/sensor/{NODE}/recognized/config"
-STATE_TOPIC = f"{NODE}/recognized/state"
-ATTR_TOPIC = f"{NODE}/recognized/attributes"
 AVAIL_TOPIC = f"{NODE}/status"
+AGG_SLUG = "recognized"            # the legacy aggregate sensor's slug
+
+
+def _state_topic(slug: str) -> str:
+    return f"{NODE}/{slug}/state"
+
+
+def _attr_topic(slug: str) -> str:
+    return f"{NODE}/{slug}/attributes"
+
+
+def _disco_topic(slug: str) -> str:
+    return f"homeassistant/sensor/{NODE}/{slug}/config"
+
+
+def _device() -> dict:
+    return {"identifiers": [NODE], "name": "Local Faces",
+            "manufacturer": "Local Faces (open source)", "model": "YuNet + SFace"}
 
 
 class MqttPublisher:
-    def __init__(self, opts) -> None:
+    def __init__(self, opts, cameras) -> None:
         self.opts = opts
+        self.cameras = list(cameras)
         self.client = None
 
     def _resolve(self) -> tuple[str | None, int, str | None, str | None]:
@@ -51,7 +69,7 @@ class MqttPublisher:
     def start(self) -> None:
         host, port, user, password = self._resolve()
         if not host:
-            log.warning("MQTT unavailable - the 'Recognized Name' sensor will be disabled "
+            log.warning("MQTT unavailable - the 'Recognized Name' sensors will be disabled "
                         "(install the Mosquitto broker add-on, or set mqtt_host)")
             return
         import paho.mqtt.client as mqtt
@@ -73,29 +91,37 @@ class MqttPublisher:
         if rc != 0:
             log.warning("MQTT connection refused (rc=%s)", rc)
             return
-        config = {
+        # One sensor per camera. object_id pins the entity_id to sensor.local_faces_<slug>.
+        for cam in self.cameras:
+            client.publish(_disco_topic(cam.slug), json.dumps({
+                "name": cam.name,
+                "object_id": f"{NODE}_{cam.slug}",
+                "unique_id": f"{NODE}_{cam.slug}",
+                "state_topic": _state_topic(cam.slug),
+                "json_attributes_topic": _attr_topic(cam.slug),
+                "availability_topic": AVAIL_TOPIC,
+                "icon": "mdi:face-recognition",
+                "device": _device(),
+            }), retain=True)
+        # Aggregate - identical to the original single-sensor discovery, so the
+        # existing sensor.local_faces_recognized_name entity is preserved.
+        client.publish(_disco_topic(AGG_SLUG), json.dumps({
             "name": "Recognized Name",
             "unique_id": "local_faces_recognized",
-            "state_topic": STATE_TOPIC,
-            "json_attributes_topic": ATTR_TOPIC,
+            "state_topic": _state_topic(AGG_SLUG),
+            "json_attributes_topic": _attr_topic(AGG_SLUG),
             "availability_topic": AVAIL_TOPIC,
             "icon": "mdi:face-recognition",
-            "device": {
-                "identifiers": [NODE],
-                "name": "Local Faces",
-                "manufacturer": "Local Faces (open source)",
-                "model": "YuNet + SFace",
-            },
-        }
-        client.publish(DISCOVERY, json.dumps(config), retain=True)
+            "device": _device(),
+        }), retain=True)
         client.publish(AVAIL_TOPIC, "online", retain=True)
-        log.info("MQTT connected; 'Recognized Name' sensor announced")
+        log.info("MQTT connected; announced %d camera sensor(s) + aggregate", len(self.cameras))
 
-    def publish_state(self, state: str, attrs: dict) -> None:
+    def publish(self, slug: str, state: str, attrs: dict) -> None:
         if not self.client:
             return
-        self.client.publish(STATE_TOPIC, state, retain=True)
-        self.client.publish(ATTR_TOPIC, json.dumps(attrs), retain=True)
+        self.client.publish(_state_topic(slug), state, retain=True)
+        self.client.publish(_attr_topic(slug), json.dumps(attrs), retain=True)
 
     def stop(self) -> None:
         if not self.client:

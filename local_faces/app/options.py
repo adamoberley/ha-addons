@@ -3,9 +3,23 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass
 
 OPTIONS_PATH = "/data/options.json"
+
+
+@dataclass(frozen=True)
+class Camera:
+    name: str
+    slug: str
+    stream_url: str
+    camera_mode: str
+
+
+def _slugify(name: str) -> str:
+    s = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
+    return s or "camera"
 
 # "Fast vs Accurate" maps to the width we downscale each frame to before
 # detection: smaller is faster (good for a Pi), larger catches smaller/farther
@@ -17,6 +31,7 @@ _MODE_WIDTH = {"fast": 320, "balanced": 480, "accurate": 720}
 class Options:
     stream_url: str
     camera_mode: str
+    cameras: tuple
     preview_aspect: str
     mode: str
     recognition_model: str
@@ -50,11 +65,36 @@ def _load_raw() -> dict:
         return json.load(fh)
 
 
+def _cameras(raw: dict) -> tuple:
+    """Build the camera list. Entries in `cameras` with a stream_url win; if there
+    are none, fall back to the legacy single stream_url so older configs still work."""
+    out, seen = [], set()
+    for c in (raw.get("cameras") or []):
+        url = str((c or {}).get("stream_url", "")).strip()
+        if not url:
+            continue
+        name = str(c.get("name", "")).strip() or "Camera"
+        slug = base = _slugify(name)
+        n = 2
+        while slug in seen:
+            slug, n = f"{base}_{n}", n + 1
+        seen.add(slug)
+        mode = str(c.get("camera_mode", "stream")).strip() or "stream"
+        out.append(Camera(name, slug, url, mode))
+    if not out:
+        url = str(raw.get("stream_url", "")).strip()
+        if url:
+            mode = str(raw.get("camera_mode", "stream")).strip() or "stream"
+            out.append(Camera("Camera", "camera", url, mode))
+    return tuple(out)
+
+
 def load() -> Options:
     raw = _load_raw()
     return Options(
         stream_url=str(raw.get("stream_url", "")).strip(),
         camera_mode=str(raw.get("camera_mode", "stream")).strip() or "stream",
+        cameras=_cameras(raw),
         preview_aspect=str(raw.get("preview_aspect", "auto")).strip() or "auto",
         mode=str(raw.get("mode", "balanced")).strip() or "balanced",
         recognition_model=str(raw.get("recognition_model", "sface")).strip() or "sface",

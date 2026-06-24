@@ -27,10 +27,10 @@ def _redact(url: str) -> str:
 
 
 class CameraSource:
-    def __init__(self, opts) -> None:
-        self.url = opts.stream_url
-        self.mode = opts.camera_mode
-        self.poll = max(0.2, opts.detect_interval)
+    def __init__(self, url: str, mode: str, poll: float) -> None:
+        self.url = url
+        self.mode = mode
+        self.poll = max(0.2, poll)
         self._latest: np.ndarray | None = None
         self._lock = threading.Lock()
         self._stop = threading.Event()

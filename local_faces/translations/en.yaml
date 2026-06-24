@@ -1,5 +1,11 @@
 # Labels + help shown on the add-on's Configuration tab.
 configuration:
+  cameras:
+    name: Cameras
+    description: >-
+      One entry per camera (name, stream URL, and mode). Leave empty to use the
+      single Camera URL below. Enrollments are shared across every camera, and
+      each camera gets its own "Recognized Name" sensor in Home Assistant.
   stream_url:
     name: Camera URL
     description: >-

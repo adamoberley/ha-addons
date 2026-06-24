@@ -45,7 +45,7 @@ class RecognitionLog:
             log.warning("could not persist log: %s", exc)
 
     def add(self, name: str, score: float, unknown: bool, thumb: bytes,
-            embedding, model: str) -> None:
+            embedding, model: str, camera: str = "") -> None:
         with self._lock:
             self.events.insert(0, {
                 "id": secrets.token_hex(6),
@@ -53,6 +53,7 @@ class RecognitionLog:
                 "name": name,
                 "score": round(float(score), 3),
                 "unknown": unknown,
+                "camera": camera,
                 "thumb": base64.b64encode(thumb).decode("ascii") if thumb else "",
                 "emb": [round(float(v), 6) for v in embedding],
                 "model": model,
@@ -64,7 +65,7 @@ class RecognitionLog:
         """Display view for the dashboard - omits the bulky embedding."""
         with self._lock:
             return [
-                {k: e[k] for k in ("id", "ts", "name", "score", "unknown", "thumb")}
+                {k: e.get(k) for k in ("id", "ts", "name", "score", "unknown", "thumb", "camera")}
                 for e in self.events
             ]
 

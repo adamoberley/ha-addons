@@ -1,24 +1,21 @@
-"""Ingress dashboard: a live face-recognition console.
+"""Ingress dashboard: a live multi-camera face-recognition console.
 
 Bound to 0.0.0.0 for ingress (HA authenticates it). All URLs are relative so they
 work under the ingress token path. The handler calls into the App for everything:
-a smooth MJPEG feed, a capture -> confirm -> save enrollment flow (raw image bytes
-in the POST body, no multipart), and naming an unknown face straight from the log.
+a polled JPEG per camera (ingress doesn't pass MJPEG), capture -> confirm -> save
+enrollment (raw image bytes in the POST body, no multipart), and naming an unknown
+face straight from the log.
 """
 from __future__ import annotations
 
 import json
 import logging
-import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 log = logging.getLogger("local-faces.server")
 
 # Single self-contained page. No external fonts/assets (ingress has no CDN).
-# Design: a "porch-lantern" instrument panel - amber means someone you know is
-# here; coral means a stranger. Monospace labels + system-sans names on a deep
-# plum-ink screen. The hero is the live viewport itself.
 PAGE = b"""<!doctype html>
 <html lang="en">
 <head>
@@ -50,10 +47,6 @@ PAGE = b"""<!doctype html>
          padding:18px; -webkit-font-smoothing:antialiased; }
   .wrap { max-width:940px; margin:0 auto; }
 
-  .eyebrow { font-family:var(--mono); font-size:11px; letter-spacing:.16em;
-             text-transform:uppercase; color:var(--muted); }
-
-  /* Header / wordmark */
   .topbar { display:flex; align-items:center; justify-content:space-between;
             gap:12px; margin-bottom:16px; }
   .brand { display:flex; align-items:center; gap:11px; }
@@ -73,48 +66,44 @@ PAGE = b"""<!doctype html>
   .pill.live .dot { background:var(--accent); animation:pulse 2s infinite; }
   .pill.alert .dot { background:var(--alert); }
 
-  /* Hero viewport */
-  .viewport { position:relative; aspect-ratio:16/9; background:var(--screen);
-              border-radius:var(--r); overflow:hidden; border:1px solid var(--border);
-              box-shadow:0 1px 0 var(--border); }
-  .viewport::before { content:""; position:absolute; inset:0; z-index:3;
-              pointer-events:none; border-top:3px solid transparent;
-              transition:border-color .4s, box-shadow .4s; }
-  .viewport.known::before { border-top-color:var(--accent);
-              box-shadow:inset 0 14px 30px -16px var(--accent); }
-  .viewport.unknown::before { border-top-color:var(--alert);
-              box-shadow:inset 0 14px 30px -16px var(--alert); }
-  .viewport img { width:100%; height:100%; object-fit:contain; display:block; }
-  .scan { position:absolute; left:0; right:0; top:0; height:42%; z-index:2;
-          background:linear-gradient(to bottom, transparent, rgba(224,162,76,.16));
-          border-bottom:1px solid rgba(224,162,76,.5); opacity:0; }
-  .viewport.watching .scan { opacity:1; animation:scan 3.6s linear infinite; }
-  .vp-overlay { position:absolute; inset:0; z-index:4; display:none;
-                flex-direction:column; align-items:center; justify-content:center;
-                gap:6px; text-align:center; padding:24px; color:var(--screen-text); }
-  .viewport.no-feed .vp-overlay { display:flex; }
-  .vp-overlay .ttl { font-family:var(--mono); letter-spacing:.12em;
-                     text-transform:uppercase; font-size:12px; }
-  .vp-overlay .hint { font-size:13px; color:#B7AFC0; max-width:34ch; }
-  .vp-status { position:absolute; left:0; right:0; bottom:0; z-index:4;
-               display:flex; align-items:center; gap:10px; padding:12px 14px;
-               color:var(--screen-text); font-family:var(--mono); font-size:12px;
-               letter-spacing:.06em;
-               background:linear-gradient(to top, rgba(0,0,0,.62), transparent); }
-  .vp-status .who { color:var(--accent); text-transform:none; letter-spacing:0;
-                    font-family:var(--sans); font-weight:600; font-size:14px; }
-  .viewport.unknown .vp-status .who { color:var(--alert-text); }
-  .vp-status .sep { color:#8c8696; }
+  /* Camera tiles */
+  .cams { display:grid; gap:12px; margin-bottom:14px;
+          grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); }
+  .cam { position:relative; aspect-ratio:16/9; background:var(--screen);
+         border-radius:var(--r); overflow:hidden; border:1px solid var(--border); }
+  .cam::before { content:""; position:absolute; inset:0; z-index:3; pointer-events:none;
+                 border-top:3px solid transparent; transition:border-color .4s, box-shadow .4s; }
+  .cam.known::before { border-top-color:var(--accent);
+                       box-shadow:inset 0 14px 30px -16px var(--accent); }
+  .cam.unknown::before { border-top-color:var(--alert);
+                         box-shadow:inset 0 14px 30px -16px var(--alert); }
+  .cam img { width:100%; height:100%; object-fit:contain; display:block; }
+  .cam.offline img { opacity:.25; }
+  .cam .cap { position:absolute; top:10px; right:10px; z-index:5; font:inherit;
+              font-size:12px; font-weight:600; padding:6px 10px; border-radius:8px;
+              border:1px solid var(--border); background:rgba(0,0,0,.5);
+              color:var(--screen-text); cursor:pointer; }
+  .cam .cap:hover { background:rgba(0,0,0,.7); }
+  .cam .cap:disabled { opacity:.5; cursor:default; }
+  .cam-bar { position:absolute; left:0; right:0; bottom:0; z-index:4;
+             display:flex; align-items:baseline; gap:10px; padding:10px 12px;
+             background:linear-gradient(to top, rgba(0,0,0,.66), transparent); }
+  .cam-name { font-family:var(--mono); font-size:11px; letter-spacing:.08em;
+              text-transform:uppercase; color:var(--screen-text); }
+  .cam-who { font-weight:600; font-size:14px; color:#cfc8d6; margin-left:auto; }
+  .cam-who.known { color:var(--accent); }
+  .cam-who.unknown { color:var(--alert-text); }
+  .empty-cams { grid-column:1/-1; padding:28px; text-align:center; color:var(--muted);
+                font-size:13px; background:var(--surface); border:1px solid var(--border);
+                border-radius:var(--r); }
 
   /* Body grid */
-  .grid { display:grid; gap:14px; margin-top:14px;
-          grid-template-columns:1fr 1fr;
+  .grid { display:grid; gap:14px; grid-template-columns:1fr 1fr;
           grid-template-areas:"enroll sightings" "people sightings"; }
   .enroll { grid-area:enroll; } .people { grid-area:people; }
   .sightings { grid-area:sightings; }
   @media (max-width:720px) {
-    .grid { grid-template-columns:1fr;
-            grid-template-areas:"enroll" "people" "sightings"; }
+    .grid { grid-template-columns:1fr; grid-template-areas:"enroll" "people" "sightings"; }
   }
 
   .card { background:var(--surface); border:1px solid var(--border);
@@ -123,7 +112,6 @@ PAGE = b"""<!doctype html>
                text-transform:uppercase; color:var(--muted); font-weight:600; }
   .card .lead { margin:4px 0 14px; font-size:13px; color:var(--muted); }
 
-  /* Enroll */
   .field { display:flex; flex-direction:column; gap:7px; }
   label.lbl { font-family:var(--mono); font-size:11px; letter-spacing:.1em;
               text-transform:uppercase; color:var(--muted); }
@@ -149,7 +137,6 @@ PAGE = b"""<!doctype html>
                 border:2px solid var(--accent); flex:none; }
   .review .rc { flex:1; min-width:0; }
 
-  /* Lists (people + sightings) */
   ul.list { list-style:none; padding:0; margin:14px 0 0; }
   ul.list .empty { color:var(--muted); font-size:13px; padding:6px 0; }
   .item { display:flex; align-items:center; gap:11px; padding:10px 0;
@@ -176,11 +163,6 @@ PAGE = b"""<!doctype html>
   .nameform input { flex:1; }
 
   @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:.35;} }
-  @keyframes scan { from{transform:translateY(-100%);} to{transform:translateY(240%);} }
-  @media (prefers-reduced-motion: reduce) {
-    .pill.live .dot { animation:none; }
-    .viewport.watching .scan { animation:none; opacity:0; }
-  }
 </style>
 </head>
 <body>
@@ -195,18 +177,9 @@ PAGE = b"""<!doctype html>
     <span class="pill" id="pill"><span class="dot"></span><span id="pillText">Starting</span></span>
   </div>
 
-  <div class="viewport no-feed" id="viewport">
-    <img id="feed" alt="Live camera view">
-    <div class="scan"></div>
-    <div class="vp-overlay">
-      <div class="ttl" id="ovTitle">Waiting for the camera</div>
-      <div class="hint" id="ovHint">The live view appears here once your camera connects.</div>
-    </div>
-    <div class="vp-status">
-      <span id="vpState">Idle</span>
-      <span class="sep">/</span>
-      <span id="vpFaces">0 faces</span>
-      <span class="who" id="vpWho"></span>
+  <div class="cams" id="cams">
+    <div class="empty-cams" id="emptyCams" style="display:none">
+      No cameras configured. Add one on the Configuration tab, then restart.
     </div>
   </div>
 
@@ -214,8 +187,8 @@ PAGE = b"""<!doctype html>
 
     <section class="card enroll">
       <h2>Enroll a face</h2>
-      <p class="lead">Capture from the live camera or upload a clear photo, then give
-         it a name. A few angles per person works best.</p>
+      <p class="lead">Press <b>Capture</b> on a camera above, or upload a clear photo,
+         then give it a name. A few angles per person works best.</p>
 
       <div class="field">
         <label class="lbl" for="name">Name</label>
@@ -223,7 +196,6 @@ PAGE = b"""<!doctype html>
       </div>
 
       <div class="btns" id="captureBtns">
-        <button class="btn-primary" id="capture">Capture from camera</button>
         <button class="btn-ghost" id="pick">Upload photo</button>
         <input type="file" id="file" accept="image/*" hidden>
       </div>
@@ -249,8 +221,8 @@ PAGE = b"""<!doctype html>
 
     <section class="card sightings">
       <h2>Recent sightings</h2>
-      <p class="lead">Every recognized and unknown face. See an unknown you know?
-         Name it here and they'll be recognized next time.</p>
+      <p class="lead">Every recognized and unknown face, with its camera. See an
+         unknown you know? Name it here and they'll be recognized next time.</p>
       <ul class="list" id="log"></ul>
     </section>
 
@@ -259,77 +231,89 @@ PAGE = b"""<!doctype html>
 
 <script>
 (function(){
-  var pendingToken = null;
-  var aspectMode = "auto";  // viewport shape: "auto" follows the camera frame
+  var pendingToken = null, aspectMode = "auto";
+  var tiles = {};   // slug -> { root, img, who }
 
   function el(id){ return document.getElementById(id); }
-  function setMsg(t, kind){ var m=el("msg"); m.textContent=t||"\\u00a0";
+  function setMsg(t, kind){ var m=el("msg"); m.textContent=t||" ";
     m.className="msg"+(kind?(" "+kind):""); }
   function fmtTime(t){ return t ? new Date(t*1000).toLocaleString() : "-"; }
   function pct(s){ return Math.round(s*100)+"%"; }
-
   function api(path, opts){
     return fetch(path, Object.assign({cache:"no-store"}, opts||{}))
       .then(function(r){ return r.json(); });
   }
-  function busy(ids, on){ ids.forEach(function(id){ el(id).disabled=on; }); }
 
-  // ---- live feed + status ----
-  // Poll a single JPEG rather than an MJPEG stream: HA's ingress proxy does not
-  // pass multipart/x-mixed-replace, so an <img src="stream.mjpeg"> renders broken
-  // under ingress. Preload each frame and swap on load so we never flash the
-  // browser's broken-image icon between updates or while the camera reconnects.
-  (function(){
-    var feed = el("feed");
-    function tick(){
-      var probe = new Image();
-      probe.onload = function(){
-        // In "auto" mode, size the viewport to the camera's real frame so a
-        // portrait (9:16) feed isn't cropped. Explicit ratios come from status.
-        if(aspectMode==="auto" && probe.naturalWidth && probe.naturalHeight){
-          el("viewport").style.aspectRatio = probe.naturalWidth+" / "+probe.naturalHeight;
-        }
-        feed.src = probe.src;
-      };
-      probe.src = "preview.jpg?t=" + Date.now();
-    }
-    tick();
-    setInterval(tick, 500);
-  })();
+  // ---- camera tiles + polled feeds ----
+  function ensureTile(cam){
+    if(tiles[cam.slug]) return tiles[cam.slug];
+    var root=document.createElement("div"); root.className="cam";
+    var img=document.createElement("img"); img.alt=cam.name+" live view"; root.appendChild(img);
+    var cap=document.createElement("button"); cap.className="cap"; cap.textContent="Capture";
+    cap.addEventListener("click", function(){ captureFrom(cam.slug, cap); });
+    root.appendChild(cap);
+    var bar=document.createElement("div"); bar.className="cam-bar";
+    var nm=document.createElement("span"); nm.className="cam-name"; nm.textContent=cam.name;
+    var who=document.createElement("span"); who.className="cam-who";
+    bar.appendChild(nm); bar.appendChild(who); root.appendChild(bar);
+    el("cams").appendChild(root);
+    var t={ root:root, img:img, who:who }; tiles[cam.slug]=t;
+    pollTile(cam.slug);
+    return t;
+  }
+  function pollTile(slug){
+    var t=tiles[slug]; if(!t) return;
+    var probe=new Image();
+    probe.onload=function(){
+      if(aspectMode==="auto" && probe.naturalWidth && probe.naturalHeight){
+        t.root.style.aspectRatio=probe.naturalWidth+" / "+probe.naturalHeight;
+      }
+      t.img.src=probe.src;
+    };
+    probe.src="preview.jpg?cam="+encodeURIComponent(slug)+"&t="+Date.now();
+  }
+  function refreshFeeds(){ for(var slug in tiles){ pollTile(slug); } }
+
+  function captureFrom(slug, btn){
+    btn.disabled=true; setMsg("Looking for a face...");
+    api("enroll/capture?cam="+encodeURIComponent(slug), {method:"POST"}).then(function(r){
+      btn.disabled=false;
+      if(r.ok && r.token){ setMsg(r.message, "ok"); showReview(r.thumb, r.token); }
+      else { setMsg(r.message || "No face found.", "err"); }
+    }).catch(function(){ btn.disabled=false; setMsg("Something went wrong. Try again.","err"); });
+  }
 
   function refreshStatus(){
     api("status").then(function(s){
-      var vp=el("viewport");
-      if(s.aspect){ aspectMode = s.aspect;
-        if(aspectMode!=="auto"){ vp.style.aspectRatio = aspectMode.replace(":"," / "); } }
-      vp.classList.toggle("no-feed", !s.camera_ok);
-      vp.classList.toggle("watching", !!s.camera_ok);
-      vp.classList.toggle("known", s.state==="known");
-      vp.classList.toggle("unknown", s.state==="unknown");
-
-      if(!s.stream_set){
-        el("ovTitle").textContent="No camera connected";
-        el("ovHint").textContent="Set your camera's URL on the Configuration tab, then restart.";
-      } else if(!s.camera_ok){
-        el("ovTitle").textContent="Connecting to the camera";
-        el("ovHint").textContent=
-          "Hang tight \\u2014 the live view starts as soon as frames arrive.";
-      }
-
+      if(s.aspect) aspectMode=s.aspect;
+      var cams=s.cameras||[];
+      el("emptyCams").style.display = cams.length ? "none" : "";
+      var anyOk=false, anyKnown=false, anyUnknown=false;
+      cams.forEach(function(c){
+        var t=ensureTile(c);
+        if(aspectMode!=="auto") t.root.style.aspectRatio=aspectMode.replace(":"," / ");
+        t.root.classList.toggle("known", c.state==="known");
+        t.root.classList.toggle("unknown", c.state==="unknown");
+        t.root.classList.toggle("offline", !c.camera_ok);
+        if(c.state==="known" && c.recognized) t.who.textContent=c.recognized+"  "+pct(c.score);
+        else if(c.state==="unknown") t.who.textContent="Unknown";
+        else if(c.camera_ok) t.who.textContent=c.faces+(c.faces===1?" face":" faces");
+        else t.who.textContent="no signal";
+        t.who.className="cam-who"+(c.state==="known"?" known":(c.state==="unknown"?" unknown":""));
+        anyOk=anyOk||c.camera_ok; anyKnown=anyKnown||c.state==="known"; anyUnknown=anyUnknown||c.state==="unknown";
+      });
       var pill=el("pill");
-      pill.className="pill"+(s.camera_ok?" live":(s.stream_set?" alert":""));
-      el("pillText").textContent = s.camera_ok ? "Live"
-        : (s.stream_set ? "No signal" : "Set up camera");
-
-      el("vpState").textContent = s.state==="known" ? "Recognized"
-        : (s.state==="unknown" ? "Unknown face" : "Watching");
-      el("vpFaces").textContent = s.faces + (s.faces===1?" face":" faces");
-      el("vpWho").textContent = (s.state==="known" && s.recognized)
-        ? (s.recognized + "  " + pct(s.score)) : "";
+      pill.className="pill"+(anyUnknown?" alert":(anyOk?" live":""));
+      el("pillText").textContent = cams.length ? (anyOk?"Live":"No signal") : "Set up cameras";
     }).catch(function(){});
   }
 
   // ---- known people ----
+  function makeThumb(b64, unknown){
+    if(b64){ var im=document.createElement("img"); im.className="thumb"+(unknown?" unknown":"");
+      im.src="data:image/jpeg;base64,"+b64; im.alt=""; return im; }
+    var sp=document.createElement("span"); sp.className="thumb"+(unknown?" unknown":""); return sp;
+  }
   function refreshPeople(){
     api("people").then(function(d){
       var ul=el("people"); ul.innerHTML="";
@@ -351,21 +335,14 @@ PAGE = b"""<!doctype html>
         del.addEventListener("click", function(){
           if(!confirm("Remove "+p.name+"?")) return;
           api("person/delete?name="+encodeURIComponent(p.name), {method:"POST"})
-            .then(function(r){ setMsg(r.message, r.ok?"ok":"err");
-              refreshPeople(); refreshLog(); });
+            .then(function(r){ setMsg(r.message, r.ok?"ok":"err"); refreshPeople(); refreshLog(); });
         });
         li.appendChild(del); ul.appendChild(li);
       });
     }).catch(function(){});
   }
 
-  function makeThumb(b64, unknown){
-    if(b64){ var im=document.createElement("img"); im.className="thumb"+(unknown?" unknown":"");
-      im.src="data:image/jpeg;base64,"+b64; im.alt=""; return im; }
-    var sp=document.createElement("span"); sp.className="thumb"+(unknown?" unknown":""); return sp;
-  }
-
-  // ---- sightings log (with name-from-log) ----
+  // ---- sightings (camera-tagged, with name-from-log) ----
   function refreshLog(){
     api("log").then(function(d){
       var ul=el("log"); ul.innerHTML="";
@@ -388,7 +365,7 @@ PAGE = b"""<!doctype html>
         badge.textContent=e.unknown?"new":pct(e.score);
         top.appendChild(badge);
         var meta=document.createElement("div"); meta.className="meta";
-        meta.textContent=fmtTime(e.ts);
+        meta.textContent=(e.camera?e.camera+" - ":"")+fmtTime(e.ts);
         col.appendChild(top); col.appendChild(meta); li.appendChild(col);
 
         if(e.unknown){
@@ -428,57 +405,48 @@ PAGE = b"""<!doctype html>
     input.addEventListener("keydown", function(ev){ if(ev.key==="Enter") submit(); });
   }
 
-  // ---- enrollment: capture/upload -> review -> save ----
+  // ---- enrollment: capture (per camera) / upload -> review -> save ----
   function showReview(thumbB64, token){
     pendingToken=token;
     el("reviewThumb").src="data:image/jpeg;base64,"+thumbB64;
     el("review").classList.add("show");
-    el("captureBtns").style.display="none";
     el("name").focus();
   }
   function resetEnroll(){
     pendingToken=null;
     el("review").classList.remove("show");
-    el("captureBtns").style.display="";
   }
-  function stage(promise, ids){
-    busy(ids, true); setMsg("Looking for a face\\u2026");
-    promise.then(function(r){
-      busy(ids, false);
-      if(r.ok && r.token){ setMsg(r.message, "ok"); showReview(r.thumb, r.token); }
-      else { setMsg(r.message, "err"); }
-    }).catch(function(){ busy(ids,false); setMsg("Something went wrong. Try again.","err"); });
-  }
-
-  el("capture").addEventListener("click", function(){
-    stage(api("enroll/capture", {method:"POST"}), ["capture","pick"]);
-  });
   el("pick").addEventListener("click", function(){ el("file").click(); });
   el("file").addEventListener("change", function(){
     var f=this.files[0]; if(!f) return;
-    stage(api("enroll/upload", {method:"POST", body:f}), ["capture","pick"]);
+    el("pick").disabled=true; setMsg("Looking for a face...");
+    api("enroll/upload", {method:"POST", body:f}).then(function(r){
+      el("pick").disabled=false;
+      if(r.ok && r.token){ setMsg(r.message,"ok"); showReview(r.thumb, r.token); }
+      else { setMsg(r.message,"err"); }
+    }).catch(function(){ el("pick").disabled=false; setMsg("Something went wrong. Try again.","err"); });
     this.value="";
   });
   el("save").addEventListener("click", function(){
     var n=el("name").value.trim();
     if(!n){ setMsg("Enter a name first.","err"); el("name").focus(); return; }
     if(!pendingToken){ resetEnroll(); return; }
-    busy(["save","retake"], true);
+    busy(true);
     api("enroll/commit?token="+encodeURIComponent(pendingToken)+"&name="+encodeURIComponent(n),
         {method:"POST"}).then(function(r){
-      busy(["save","retake"], false); setMsg(r.message, r.ok?"ok":"err");
+      busy(false); setMsg(r.message, r.ok?"ok":"err");
       if(r.ok){ el("name").value=""; resetEnroll(); refreshPeople(); refreshLog(); }
-    }).catch(function(){ busy(["save","retake"],false); setMsg("Save failed. Try again.","err"); });
+    }).catch(function(){ busy(false); setMsg("Save failed. Try again.","err"); });
   });
   el("retake").addEventListener("click", function(){
-    if(pendingToken){
-      api("enroll/cancel?token="+encodeURIComponent(pendingToken), {method:"POST"});
-    }
+    if(pendingToken){ api("enroll/cancel?token="+encodeURIComponent(pendingToken), {method:"POST"}); }
     resetEnroll(); setMsg("");
   });
+  function busy(on){ el("save").disabled=on; el("retake").disabled=on; }
 
   refreshStatus(); refreshPeople(); refreshLog();
-  setInterval(refreshStatus, 1200);
+  setInterval(refreshStatus, 1500);
+  setInterval(refreshFeeds, 600);
   setInterval(refreshLog, 5000);
   setInterval(refreshPeople, 15000);
 })();
@@ -510,29 +478,10 @@ def make_server(app, host: str = "0.0.0.0", port: int = 8099):
             length = int(self.headers.get("Content-Length", 0) or 0)
             return self.rfile.read(length) if length else b""
 
-        def _stream(self):
-            self.send_response(200)
-            self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
-            self.send_header("Cache-Control", "no-cache, private")
-            self.send_header("Pragma", "no-cache")
-            self.end_headers()
-            try:
-                while app.running:
-                    jpeg = app.preview_jpeg()
-                    if jpeg:
-                        self.wfile.write(b"--frame\r\n")
-                        self.wfile.write(b"Content-Type: image/jpeg\r\n")
-                        self.wfile.write(f"Content-Length: {len(jpeg)}\r\n\r\n".encode())
-                        self.wfile.write(jpeg)
-                        self.wfile.write(b"\r\n")
-                    time.sleep(0.4)
-            except (BrokenPipeError, ConnectionResetError, OSError):
-                return
-
         def do_POST(self):
             path = urlparse(self.path).path
             if path == "/enroll/capture":
-                self._json(app.stage_from_frame())
+                self._json(app.stage_from_frame(self._param("cam")))
             elif path == "/enroll/upload":
                 self._json(app.stage_from_image(self._body()))
             elif path == "/enroll/commit":
@@ -556,10 +505,8 @@ def make_server(app, host: str = "0.0.0.0", port: int = 8099):
                 self._json({"people": app.db.people()})
             elif path == "/log":
                 self._json({"events": app.reclog.recent()})
-            elif path == "/stream.mjpeg":
-                self._stream()
             elif path == "/preview.jpg":
-                jpeg = app.preview_jpeg()
+                jpeg = app.preview_jpeg(self._param("cam"))
                 if jpeg:
                     self._send(200, "image/jpeg", jpeg)
                 else:
