@@ -1,5 +1,9 @@
-ARG BUILD_FROM
-FROM ${BUILD_FROM}
+# Pin the Debian base directly. The Supervisor was not honoring build.yaml's
+# `build_from` and fell back to its Alpine base image, where `apt-get` is absent
+# (build failed: "ash: apt-get: not found") and the glibc-only opencv/onnxruntime
+# wheels can't load. python:3.12-slim is multi-arch (amd64 + arm64), so this is
+# correct for every arch in build.yaml.
+FROM python:3.12-slim
 
 ENV LANG=C.UTF-8 \
     PYTHONUNBUFFERED=1 \
