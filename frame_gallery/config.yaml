@@ -6,7 +6,7 @@
 # piles up) and never repeating recent pieces. Switches daily (or on your own
 # interval); no automation needed.
 name: REFRAMED Gallery
-version: "0.3.0"
+version: "0.4.0"
 slug: frame_gallery
 description: >-
   Curated public-domain art on your Samsung Frame TV from reframed.gallery -
@@ -37,11 +37,18 @@ panel_title: REFRAMED Gallery
 map:
   - "homeassistant_config:ro"
 
+# MQTT (auto-detected from the Mosquitto add-on) powers the HA entities:
+# a Current Art sensor, a Next button, and a Collection select.
+services:
+  - mqtt:want
+
 options:
   tv_ip: ""
   interval_minutes: 1440
   daily_time: "04:00"
   source: "reframed"
+  collection: "seasonal"
+  hemisphere: "north"
   resolution: "3840x2160"
   query: ""
   public_domain_only: true
@@ -50,6 +57,11 @@ options:
   mat_color: "#141414"
   active_hours: ""
   avoid_repeat_count: 2000
+  enable_mqtt: true
+  mqtt_host: ""
+  mqtt_port: 1883
+  mqtt_username: ""
+  mqtt_password: ""
   log_level: "info"
 
 schema:
@@ -64,6 +76,12 @@ schema:
   # public-domain collection (recommended). "artic" = the Art Institute of Chicago's
   # full public-domain catalogue (huge, but lots of non-painting objects).
   source: "list(reframed|artic)"
+  # reframed only: which collection to pull. "seasonal" auto-tracks the date
+  # (Winter/Spring/Summer/Fall, December = Christmas); "all" = whole catalogue; or a
+  # collection slug like "by-the-sea", "golden-hour", "nocturnes-moonlight".
+  collection: "str?"
+  # Hemisphere for "seasonal" (flips the calendar for the Southern hemisphere).
+  hemisphere: "list(north|south)"
   resolution: "list(3840x2160|1920x1080)"
   # Free-text art search to shape the collection, e.g. "landscape",
   # "impressionism", "ukiyo-e", "still life". Blank = all public-domain works.
@@ -82,4 +100,11 @@ schema:
   active_hours: "str?"
   # Don't repeat the last N pieces (0 = allow repeats).
   avoid_repeat_count: "int(0,5000)"
+  # Expose HA entities (Current Art sensor, Next button, Collection select) over MQTT
+  # discovery. Leave the MQTT fields blank to auto-detect the Mosquitto add-on.
+  enable_mqtt: "bool"
+  mqtt_host: "str?"
+  mqtt_port: "port"
+  mqtt_username: "str?"
+  mqtt_password: "password?"
   log_level: "list(debug|info|warning|error)"

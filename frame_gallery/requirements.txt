@@ -4,3 +4,4 @@ samsungtvws==3.0.5
 websocket-client>=1.6,<2     # sync transport used by samsungtvws
 Pillow>=10.0
 requests>=2.31
+paho-mqtt>=1.6,<2            # HA entities: Current Art sensor, Next button, Collection select

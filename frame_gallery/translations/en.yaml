@@ -22,6 +22,17 @@ configuration:
       Frame-ready public-domain collection (recommended). "artic" uses the Art
       Institute of Chicago's full public-domain catalogue - far larger, but with
       many non-painting objects (coins, fragments, textiles).
+  collection:
+    name: Collection (reframed)
+    description: >-
+      Which reframed.gallery collection to show. "seasonal" auto-tracks the date
+      (Winter/Spring/Summer/Fall, with December = Christmas); "all" pulls the whole
+      catalogue; or set a collection slug like "by-the-sea", "golden-hour", or
+      "nocturnes-moonlight".
+  hemisphere:
+    name: Hemisphere
+    description: >-
+      Used by "seasonal" only - flips the season calendar for the Southern hemisphere.
   resolution:
     name: Panel resolution
     description: 3840x2160 for 4K Frames (most); 1920x1080 for 32" / pre-2021.
@@ -59,6 +70,24 @@ configuration:
     description: >-
       Don't repeat the last N pieces (0 = allow repeats). The fix for the old
       art-changer showing the same things over and over.
+  enable_mqtt:
+    name: Home Assistant entities (MQTT)
+    description: >-
+      Expose a Current Art sensor, a Next button, and a Collection select to Home
+      Assistant via MQTT discovery, so you can automate the gallery. Requires the
+      Mosquitto broker add-on (or your own).
+  mqtt_host:
+    name: MQTT host
+    description: Leave blank to auto-detect the Mosquitto broker add-on. Set it for an external broker.
+  mqtt_port:
+    name: MQTT port
+    description: MQTT broker port (default 1883). Only used with a manual host.
+  mqtt_username:
+    name: MQTT username
+    description: Only used with a manual MQTT host.
+  mqtt_password:
+    name: MQTT password
+    description: Only used with a manual MQTT host.
   log_level:
     name: Log level
     description: Set to debug to troubleshoot the art source or TV connection.

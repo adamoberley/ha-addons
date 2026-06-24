@@ -17,12 +17,19 @@ class Options:
     height: int
     query: str
     source: str
+    collection: str
+    hemisphere: str
     public_domain_only: bool
     exclude_keywords: tuple
     fit: str
     mat_color: str
     active_hours: str
     avoid_repeat_count: int
+    enable_mqtt: bool
+    mqtt_host: str
+    mqtt_port: int
+    mqtt_username: str
+    mqtt_password: str
     log_level: str
 
     @property
@@ -58,11 +65,18 @@ def load() -> Options:
         height=height,
         query=str(raw.get("query", "")).strip(),
         source=str(raw.get("source", "reframed")).strip() or "reframed",
+        collection=str(raw.get("collection", "seasonal")).strip() or "seasonal",
+        hemisphere=str(raw.get("hemisphere", "north")).strip() or "north",
         public_domain_only=bool(raw.get("public_domain_only", True)),
         exclude_keywords=_keywords(raw.get("exclude_keywords", "")),
-        fit=str(raw.get("fit", "matte")),
+        fit=str(raw.get("fit", "crop")),
         mat_color=str(raw.get("mat_color", "#141414")).strip() or "#141414",
         active_hours=str(raw.get("active_hours", "")).strip(),
-        avoid_repeat_count=int(raw.get("avoid_repeat_count", 500)),
+        avoid_repeat_count=int(raw.get("avoid_repeat_count", 2000)),
+        enable_mqtt=bool(raw.get("enable_mqtt", True)),
+        mqtt_host=str(raw.get("mqtt_host", "")).strip(),
+        mqtt_port=int(raw.get("mqtt_port", 1883)),
+        mqtt_username=str(raw.get("mqtt_username", "")).strip(),
+        mqtt_password=str(raw.get("mqtt_password", "")),
         log_level=str(raw.get("log_level", "info")),
     )

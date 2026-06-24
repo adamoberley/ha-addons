@@ -21,6 +21,7 @@ import options as options_mod
 import server
 import urllib3
 from imaging import fit_to_panel
+from mqtt_ctl import MqttCtl
 from sources.artic import ArticSource
 from sources.reframed import ReframedSource
 from state import History
@@ -100,6 +101,18 @@ def main() -> int:
     tvs = [FrameTV(host) for host in tv_hosts]
     history = History(opts.avoid_repeat_count)
     sources = [_SOURCES.get(opts.source, ReframedSource)()]
+    reframed_src = next((s for s in sources if getattr(s, "name", "") == "reframed"), None)
+
+    def _show_next():
+        _trigger.set()
+
+    def _set_collection(slug):
+        if reframed_src is not None:
+            reframed_src.override = slug   # active_collection() interprets seasonal/all/slug
+        _trigger.set()
+
+    mqttctl = MqttCtl(opts, _show_next, _set_collection)
+    mqttctl.start()
 
     status = {
         "busy": False, "last_ts": 0, "last_error": None,
@@ -111,9 +124,9 @@ def main() -> int:
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     log.info("control panel on :%d", SERVER_PORT)
     sched = f"daily at {opts.daily_time}" if opts.daily_time else f"every {opts.interval_minutes} min"
-    log.info("ready: %dx%d to %s, %s (source=%s, query=%r, fit=%s)",
+    log.info("ready: %dx%d to %s, %s (source=%s, collection=%s, fit=%s)",
              opts.width, opts.height, ", ".join(tv_hosts), sched,
-             opts.source, opts.query or "<all public domain>", opts.fit)
+             opts.source, opts.collection, opts.fit)
 
     def cycle() -> None:
         status["busy"] = True
@@ -141,6 +154,7 @@ def main() -> int:
                           last_error=None if ok == len(tvs) else f"pushed to {ok}/{len(tvs)} TV(s)")
             log.info("showing '%s' by %s (%s) -> %d/%d TV(s)",
                      art.title, art.artist, art.credit, ok, len(tvs))
+            mqttctl.publish_current(art)
         except Exception as exc:
             status["last_error"] = str(exc)
             log.error("cycle failed (will retry): %s", exc)
@@ -159,6 +173,7 @@ def main() -> int:
             wait_s = _seconds_until(opts.daily_time, datetime.now()) or opts.interval_seconds
             _trigger.wait(timeout=wait_s)
     finally:
+        mqttctl.stop()
         httpd.shutdown()
     return 0
 
