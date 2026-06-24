@@ -6,7 +6,7 @@
 # never repeating recent pieces. No automation needed; no Google/Bing; content
 # is filterable to keep it family-friendly.
 name: Frame Gallery
-version: "0.1.0"
+version: "0.2.0"
 slug: frame_gallery
 description: >-
   Curated public-domain art on your Samsung Frame TV, on an interval - museum
@@ -40,6 +40,7 @@ map:
 options:
   tv_ip: ""
   interval_minutes: 60
+  source: "reframed"
   resolution: "3840x2160"
   query: ""
   public_domain_only: true
@@ -56,6 +57,10 @@ schema:
   tv_ip: "str?"
   # How often a new piece is chosen and pushed.
   interval_minutes: "int(1,1440)"
+  # Where art comes from. "reframed" = reframed.gallery's curated, Frame-ready
+  # public-domain collection (recommended). "artic" = the Art Institute of Chicago's
+  # full public-domain catalogue (huge, but lots of non-painting objects).
+  source: "list(reframed|artic)"
   resolution: "list(3840x2160|1920x1080)"
   # Free-text art search to shape the collection, e.g. "landscape",
   # "impressionism", "ukiyo-e", "still life". Blank = all public-domain works.

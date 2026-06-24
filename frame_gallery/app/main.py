@@ -22,6 +22,7 @@ import server
 import urllib3
 from imaging import fit_to_panel
 from sources.artic import ArticSource
+from sources.reframed import ReframedSource
 from state import History
 from tv import FrameTV
 
@@ -31,6 +32,8 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 SERVER_PORT = 8099
 PREVIEW_PATH = "/data/last.jpg"
+# Art sources, picked by the `source` option: reframed = curated, artic = full AIC.
+_SOURCES = {"reframed": ReframedSource, "artic": ArticSource}
 
 log = logging.getLogger("frame-gallery")
 _stop = threading.Event()
@@ -79,7 +82,7 @@ def main() -> int:
         return 1
     tvs = [FrameTV(host) for host in tv_hosts]
     history = History(opts.avoid_repeat_count)
-    sources = [ArticSource()]
+    sources = [_SOURCES.get(opts.source, ReframedSource)()]
 
     status = {
         "busy": False, "last_ts": 0, "last_error": None,
@@ -90,9 +93,9 @@ def main() -> int:
     httpd = server.make_server(_trigger, status, port=SERVER_PORT)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     log.info("control panel on :%d", SERVER_PORT)
-    log.info("ready: %dx%d to %s every %d min (query=%r, fit=%s)",
+    log.info("ready: %dx%d to %s every %d min (source=%s, query=%r, fit=%s)",
              opts.width, opts.height, ", ".join(tv_hosts), opts.interval_minutes,
-             opts.query or "<all public domain>", opts.fit)
+             opts.source, opts.query or "<all public domain>", opts.fit)
 
     def cycle() -> None:
         status["busy"] = True

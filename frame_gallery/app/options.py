@@ -15,6 +15,7 @@ class Options:
     width: int
     height: int
     query: str
+    source: str
     public_domain_only: bool
     exclude_keywords: tuple
     fit: str
@@ -54,6 +55,7 @@ def load() -> Options:
         width=width,
         height=height,
         query=str(raw.get("query", "")).strip(),
+        source=str(raw.get("source", "reframed")).strip() or "reframed",
         public_domain_only=bool(raw.get("public_domain_only", True)),
         exclude_keywords=_keywords(raw.get("exclude_keywords", "")),
         fit=str(raw.get("fit", "matte")),

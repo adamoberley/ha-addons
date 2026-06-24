@@ -9,6 +9,13 @@ configuration:
   interval_minutes:
     name: Change interval (minutes)
     description: How often a new piece is chosen and pushed to the TV.
+  source:
+    name: Art source
+    description: >-
+      Where art comes from. "reframed" pulls reframed.gallery's curated,
+      Frame-ready public-domain collection (recommended). "artic" uses the Art
+      Institute of Chicago's full public-domain catalogue - far larger, but with
+      many non-painting objects (coins, fragments, textiles).
   resolution:
     name: Panel resolution
     description: 3840x2160 for 4K Frames (most); 1920x1080 for 32" / pre-2021.
