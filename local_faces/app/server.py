@@ -274,8 +274,20 @@ PAGE = b"""<!doctype html>
   function busy(ids, on){ ids.forEach(function(id){ el(id).disabled=on; }); }
 
   // ---- live feed + status ----
-  el("feed").addEventListener("error", function(){ /* overlay handles it */ });
-  el("feed").src = "stream.mjpeg";
+  // Poll a single JPEG rather than an MJPEG stream: HA's ingress proxy does not
+  // pass multipart/x-mixed-replace, so an <img src="stream.mjpeg"> renders broken
+  // under ingress. Preload each frame and swap on load so we never flash the
+  // browser's broken-image icon between updates or while the camera reconnects.
+  (function(){
+    var feed = el("feed");
+    function tick(){
+      var probe = new Image();
+      probe.onload = function(){ feed.src = probe.src; };
+      probe.src = "preview.jpg?t=" + Date.now();
+    }
+    tick();
+    setInterval(tick, 500);
+  })();
 
   function refreshStatus(){
     api("status").then(function(s){
