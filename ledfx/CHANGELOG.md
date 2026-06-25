@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.3.0 — 2026-06-25
+
+- **The UI now follows your Home Assistant theme.** LedFX's blue themes were
+  retuned to Home Assistant's exact palette — dark: HA blue (`#03a9f4`) accents
+  on the `#111` / `#1c1c1c` backgrounds and `#e1e1e1` text; light: the same blue
+  on HA's `#fafafa` / `#fff`. When the UI runs under HA ingress it reads HA's own
+  theme variables (it's an iframe on HA's origin) and mirrors HA's **light/dark
+  mode**, so it matches whether you run HA light or dark. Your own pick in
+  **Settings → Theme** is still respected within a mode; only the mode follows HA.
+  On direct LAN access (no HA parent) it defaults to the dark HA-matched theme.
+
+- **The audio-delay fix is now upstream too.** The merge-before-validate fix we
+  ship via `patch_backend.py` was sent to LedFx as
+  [PR #1831](https://github.com/LedFx/LedFx/pull/1831) with a regression test, so
+  a future engine bump keeps the fix even once we drop the local patch.
+
 ## 1.2.0 — 2026-06-25
 
 - **Fixed the audio-delay bug for real** (not just the option workaround). LedFX

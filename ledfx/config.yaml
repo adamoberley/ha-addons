@@ -10,7 +10,7 @@
 # localhost), the engine binds the LAN so direct access works too, and the
 # packaging is de-branded.
 name: LedFX
-version: "1.2.0"
+version: "1.3.0"
 slug: ledfx
 description: >-
   Native LedFX for Home Assistant - real-time, audio-reactive lighting for WLED

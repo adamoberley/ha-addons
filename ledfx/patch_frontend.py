@@ -18,9 +18,12 @@ Fixes:
    prop is left alone.
 4. De-Blade - blank the `blademod*.svg` asset (the "BLADE MOD" sidebar badge is
    a vector asset, not inlined JS) and rename the "Blade Scene" onboarding text.
+5. Match Home Assistant's theme - retune LedFX's DarkBlue/LightBlue themes to
+   HA's exact dark/light palette and inject a script that mirrors HA's light/dark
+   mode (read from the same-origin ingress parent) onto them.
 
-We also de-brand the page title and clear any stale `localhost` backend host
-cached in localStorage by the old app at the same origin. Idempotent.
+We also de-brand the page title and set the backend host + theme in localStorage
+on every load (see patch_index). Idempotent.
 """
 from __future__ import annotations
 
@@ -53,6 +56,35 @@ BLADE_STRINGS = (
 # (4) the "BLADE MOD" sidebar badge is this vector asset; blank it out
 BLANK_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"/>'
 
+# (5) Match the Home Assistant theme. LedFX already defaults to its "DarkBlue"
+# theme under HA (it keys off the `hassTokens` localStorage HA leaves at the same
+# origin), so retune DarkBlue to HA's exact default *dark* palette and LightBlue
+# to HA's *light* palette. The index.html script (patch_index) then follows HA's
+# light/dark mode and picks between the two. Anchors are the unique minified MUI
+# theme objects; each is expected exactly once across the bundle (checked below).
+# Colors below are HA's defaults: --primary-color #03a9f4 on #111111 / #1c1c1c.
+THEME_EDITS = (
+    # DarkBlue accent: LedFX cyan (#0dbedc) -> HA blue
+    (
+        'primary:{main:"#0dbedc"},secondary:{main:"#0dbedc"}',
+        'primary:{main:"#03a9f4"},secondary:{main:"#03a9f4"}',
+    ),
+    # DarkBlue surfaces -> HA dark background (#111111) + card (#1c1c1c)
+    (
+        'background:{default:"#000",paper:"#1c1c1e"}',
+        'background:{default:"#111111",paper:"#1c1c1c"}',
+    ),
+    # DarkBlue body text -> HA dark primary text (#e1e1e1)
+    ('text:{primary:"#f9f9fb"}', 'text:{primary:"#e1e1e1"}'),
+    # LightBlue surfaces -> HA light background (#fafafa) + card (#fff)
+    (
+        'primary:{main:"#03a9f4"},secondary:{main:"#03a9f4"},'
+        'accent:{main:"#0288d1"},background:{default:"#fdfdfd",paper:"#eee"}',
+        'primary:{main:"#03a9f4"},secondary:{main:"#03a9f4"},'
+        'accent:{main:"#0288d1"},background:{default:"#fafafa",paper:"#ffffff"}',
+    ),
+)
+
 
 def _replace(src: str, old: str, new: str, label: str, expect=None) -> tuple[str, int]:
     n = src.count(old)
@@ -62,6 +94,7 @@ def _replace(src: str, old: str, new: str, label: str, expect=None) -> tuple[str
 
 
 def patch_js() -> None:
+    theme_totals = {old: 0 for old, _ in THEME_EDITS}
     for path in glob.glob(os.path.join(ROOT, "static", "js", "*.js")):
         with open(path, encoding="utf-8") as handle:
             src = original = handle.read()
@@ -76,13 +109,24 @@ def patch_js() -> None:
         for old, new in BLADE_STRINGS:
             src, n = _replace(src, old, new, f"blade-text {old!r}")
             blade_hits += n
+        theme_hits = 0
+        for old, new in THEME_EDITS:
+            src, n = _replace(src, old, new, f"theme {old[:28]!r}")
+            theme_totals[old] += n
+            theme_hits += n
 
         if src != original:
             with open(path, "w", encoding="utf-8") as handle:
                 handle.write(src)
             name = os.path.basename(path)
             print(f"[patch] {name}: host={host_hits} basename={base_hits} "
-                  f"intro={intro_hits} blade-text={blade_hits}")
+                  f"intro={intro_hits} blade-text={blade_hits} theme={theme_hits}")
+
+    # Each theme anchor should match exactly once across the whole bundle.
+    for old, total in theme_totals.items():
+        if total != 1:
+            print(f"[patch] WARNING: theme anchor {old[:40]!r} matched {total}x "
+                  f"(expected 1) - frontend theme may have changed")
 
 
 def patch_assets() -> None:
@@ -118,11 +162,40 @@ def patch_index() -> None:
         "localStorage.setItem('ledfx-hosts',JSON.stringify([b]));"
         "}catch(e){}</script>"
     )
+    # Follow the Home Assistant theme. Under HA ingress this page is an iframe
+    # served from HA's own origin, so we can read HA's theme CSS variables from
+    # the parent document and mirror its light/dark mode onto LedFX's blue themes
+    # (retuned to HA's exact palette in patch_js): DarkBlue / LightBlue. We only
+    # switch when HA's mode differs from the stored theme's mode, so a user's
+    # in-mode pick in Settings is respected; when the parent isn't readable (LAN,
+    # not in an iframe) we just default to DarkBlue if nothing is set. Runs before
+    # the app bundle, which reads `ledfx-theme` at startup.
+    themer = (
+        "<script>try{"
+        "var H=null;try{if(window.parent&&window.parent!==window){"
+        "var s=getComputedStyle(window.parent.document.documentElement),"
+        "c=(s.getPropertyValue('--primary-background-color')||"
+        "s.getPropertyValue('--card-background-color')||'').trim(),"
+        "h=c.match(/^#?([0-9a-f]{6})$/i),"
+        "g=c.match(/(\\d+)[,\\s]+(\\d+)[,\\s]+(\\d+)/),r,gr,bl;"
+        "if(h){r=parseInt(h[1].slice(0,2),16);gr=parseInt(h[1].slice(2,4),16);"
+        "bl=parseInt(h[1].slice(4,6),16);}"
+        "else if(g){r=+g[1];gr=+g[2];bl=+g[3];}"
+        "if(r!=null){H=(299*r+587*gr+114*bl)/1000<128;}"
+        "}}catch(e){}"
+        "var D={DarkRed:1,DarkOrange:1,DarkGreen:1,DarkBlue:1,DarkGrey:1,"
+        "DarkPink:1,DarkBw:1,DarkMode:1,Darkmode:1},"
+        "cur=localStorage.getItem('ledfx-theme');"
+        "if(H===null){if(!cur)localStorage.setItem('ledfx-theme','DarkBlue');}"
+        "else{var w=H?'DarkBlue':'LightBlue';"
+        "if(!cur||(!!D[cur])!==H)localStorage.setItem('ledfx-theme',w);}"
+        "}catch(e){}</script>"
+    )
     # Declutter the Home dashboard: hide the two 8-gauge stat rows (.hideTablet)
     # and the external-links FAB row (GitHub/Docs/Discord, anchored on the github
-    # Fab). Verified live against the running build. Color theming is intentionally
-    # left to the user (Settings has a theme picker) since it's subjective; we only
-    # hide whole sections by className, which is the reliable CSS lever here.
+    # Fab). Verified live against the running build. We only hide whole sections by
+    # className, which is the reliable CSS lever here (color theming is handled by
+    # the HA-theme follower above + the retuned MUI themes, not by CSS overrides).
     declutter = (
         "<style>"
         ".Content .hideTablet{display:none!important}"
@@ -132,13 +205,16 @@ def patch_index() -> None:
 
     if cleaner not in html:
         html = html.replace("<head>", "<head>" + cleaner, 1)
+    if themer not in html:
+        html = html.replace("<head>", "<head>" + themer, 1)
     if declutter not in html:
         html = html.replace("<head>", "<head>" + declutter, 1)
 
     if html != original:
         with open(index, "w", encoding="utf-8") as handle:
             handle.write(html)
-        print("[patch] index.html: de-branded title + stale-host cleaner + declutter style injected")
+        print("[patch] index.html: de-branded title + stale-host cleaner + "
+              "HA-theme follower + declutter style injected")
 
 
 if __name__ == "__main__":
