@@ -62,6 +62,30 @@ unknown, announce arrivals).
 Install it from the same repository (it appears alongside Frame Gallery). Full
 setup and tuning in [`local_faces/DOCS.md`](local_faces/DOCS.md).
 
+## Also in this repository: LedFX
+
+A third, independent add-on: **[LedFX](ledfx/DOCS.md)** — the real-time,
+audio-reactive LED controller, running **natively on Home Assistant OS**. It
+listens to your music and drives the colour and motion of your **WLED** (and
+other) lights in sync with it.
+
+The trick is the audio: LedFX takes its sound over the network from **Music
+Assistant** via the **Sendspin** protocol — so there's **no sound card, no second
+mini-PC, and no VBAN-from-a-Windows-box**. It's a clean fork of the community
+LedFX add-on, fixed for a first-class HA experience:
+
+- **Ingress that actually works** — the web UI runs in the HA sidebar (and via
+  Nabu Casa), not just on `localhost`. The frontend was patched to talk to its
+  own origin instead of a hard-coded `localhost:8888`.
+- **Reachable on the LAN too** — binds `0.0.0.0`, so `http://<ha-ip>:8888` works
+  directly (the old add-on bound `127.0.0.1` and couldn't be reached).
+- **De-branded** — clean name, icon, logo, and sidebar panel; no devil-emoji icon.
+- The official **LedFX 2.1.9** engine; audio-reactive effects, scenes, and an
+  optional **Home Assistant (MQTT)** integration to expose it all as HA entities.
+
+Install it from the same repository. Full setup — including the Music Assistant /
+Sendspin wiring — in [`ledfx/DOCS.md`](ledfx/DOCS.md).
+
 ## Shaping the collection (and keeping it family-friendly)
 
 - **`query`** — a free-text search that defines the whole gallery, e.g.

@@ -1,0 +1,54 @@
+# LedFX - Home Assistant add-on manifest.
+#
+# Runs the LedFX engine (the real-time, audio-reactive LED controller) natively
+# on Home Assistant OS - no second machine, no USB sound card. It drives WLED
+# (and other) devices and takes its audio over the network from Music Assistant
+# via the Sendspin protocol, so effects react in sync with whatever's playing.
+#
+# This is a clean fork of the community LedFx add-on, fixed for a first-class
+# HAOS experience: the web UI works under Home Assistant ingress (not just on
+# localhost), the engine binds the LAN so direct access works too, and the
+# packaging is de-branded.
+name: LedFX
+version: "1.0.0"
+slug: ledfx
+description: >-
+  Native LedFX for Home Assistant - real-time, audio-reactive lighting for WLED
+  and more, fed by Music Assistant over Sendspin. No sound card, no second box.
+url: https://github.com/adamoberley/ha-addons/tree/main/ledfx
+
+# Multi-arch Python wheels cover all three; modern HAOS is 64-bit (Pi 4+).
+arch:
+  - aarch64
+  - amd64
+  - armv7
+
+init: false
+startup: application
+boot: auto
+
+# Native sidebar panel. The web UI is served under HA ingress (authenticated by
+# Home Assistant, no extra login) and also directly on the LAN at
+# http://<your-ha-ip>:8888 for a full-speed local experience.
+ingress: true
+ingress_port: 8888
+panel_icon: mdi:led-strip-variant
+panel_title: LedFX
+
+# host_network lets LedFX see the real LAN: auto-discover WLED devices and the
+# Music Assistant Sendspin server, and stream realtime pixel data to your lights.
+# Without it, LedFX would only see the add-on's private Docker subnet.
+host_network: true
+
+# Sendspin delivers audio over the network, so no sound card is needed - but
+# ledfx still loads its audio stack at import, and audio:true keeps that happy.
+# host_dbus assists local device discovery.
+audio: true
+host_dbus: true
+
+options:
+  log_level: info
+
+schema:
+  # ledfx log verbosity. 'debug' is very loud - use it only when troubleshooting.
+  log_level: list(debug|info|warning|error)

@@ -1,0 +1,13 @@
+# Plain Debian Python base - multi-arch, with manylinux wheels for numpy/ledfx
+# so the common path needs no compiling. The Dockerfile also pins this directly
+# (the Supervisor doesn't always honor build_from), matching the rest of the repo.
+build_from:
+  aarch64: python:3.12-slim
+  amd64: python:3.12-slim
+  armv7: python:3.12-slim
+
+labels:
+  org.opencontainers.image.title: "LedFX"
+  org.opencontainers.image.description: "Native LedFX for Home Assistant - audio-reactive lighting fed by Music Assistant over Sendspin."
+  org.opencontainers.image.source: "https://github.com/adamoberley/ha-addons"
+  org.opencontainers.image.licenses: "MIT"

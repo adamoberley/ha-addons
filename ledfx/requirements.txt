@@ -1,0 +1,9 @@
+# Build helpers + the LedFX engine. python-mbedtls provides the crypto Sendspin
+# uses; numpy is pinned to the 2.x line LedFX 2.1.x expects. ledfx itself pulls
+# in the rest (aiohttp, aubio, sounddevice, voluptuous, ...).
+pkgconfig>=1.5.5
+setuptools>=69.0.3
+wheel>=0.42.0
+numpy>=2.0.0,<3.0.0
+python-mbedtls~=2.9.0
+ledfx~=2.1.9

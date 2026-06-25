@@ -1,5 +1,22 @@
 # Changelog
 
+## LedFX 1.0.0 — 2026-06-25
+
+First release of a third add-on in this repository: **LedFX**, the real-time,
+audio-reactive LED controller, running natively on Home Assistant OS.
+
+- Ships the official **LedFX 2.1.9** engine with the ingress-ready LedFX web UI.
+- **Ingress fixed** — the UI works through Home Assistant ingress (sidebar +
+  Nabu Casa), not just on `localhost`. The frontend was patched to use its own
+  origin instead of a hard-coded `localhost:8888`, with a stale-host auto-clear.
+- **Reachable on the LAN** — the engine binds `0.0.0.0`, so `http://<ha-ip>:8888`
+  works directly (the community add-on bound `127.0.0.1` and couldn't be reached).
+- **Audio via Sendspin** — takes its audio from **Music Assistant** over the
+  Sendspin protocol: no sound card, no second machine, no VBAN-from-a-PC.
+- **De-branded** packaging (clean name, icon, logo, panel; no devil-emoji icon or
+  "Blade" add-on branding) and a single `log_level` option; the rest lives in the
+  LedFX UI and persists in `/data`.
+
 ## Local Faces 0.3.0 — 2026-06-21
 
 - **Redesigned dashboard** — a "porch-lantern" console: a live MJPEG viewport as
