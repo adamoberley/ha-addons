@@ -1,5 +1,38 @@
 # Changelog
 
+## 1.1.1 — 2026-06-25
+
+- **Fix ingress host flapping / "404, no core" after a while.** The frontend
+  keeps the backend URL in `localStorage`, but the HA ingress token rotates each
+  session, so a saved host (a stale token URL, the bare Nabu Casa origin,
+  `localhost`, the LAN IP) goes 404. The add-on now clears the saved host +
+  Known-Hosts list on every load, so the UI always talks to the **live origin**.
+- **Sendspin audio delay option.** New `sendspin_delay_ms` add-on option. LedFX's
+  in-UI delay control is buggy for Sendspin (it silently resets the audio source),
+  so set the delay here instead — the add-on applies it on start and keeps the
+  Sendspin device selected. (0–5000 ms; restart to apply.)
+
+## 1.1.0 — 2026-06-25
+
+A polish release: zero-config Home Assistant control, no onboarding friction, and
+clean branding.
+
+- **Home Assistant MQTT integration ON by default, auto-configured.** The add-on
+  now declares `services: mqtt:want` and, on start, reads the Mosquitto broker
+  host/credentials the Supervisor provides and seeds LedFX's `mqtt_hass`
+  integration — **no credentials to type**. It connects on the plaintext `1883`
+  listener (the integration has no TLS). You get the standard entities: a light
+  per virtual, scene/audio/transition selectors, a play/pause switch, and a pixel
+  sensor. (Heads-up: that entity set is intentionally sparse *upstream* — there's
+  no per-effect parameter or dedicated brightness entity. Richer control would
+  need a separate HACS integration or a custom card against LedFX's REST API.)
+- **No onboarding wizard.** The "Setup Assistant" is suppressed and LedFX
+  **auto-scans for WLED on startup** (`scan_on_startup`, defaulted on). Re-scan
+  any time from **Settings → General → Scan on startup** or by hitting
+  `/api/find_devices`.
+- **De-Blade.** Removed the "BLADE MOD" sidebar badge and the "Blade Scene"
+  onboarding step/strings. (The page title was already de-branded.)
+
 ## 1.0.3 — 2026-06-25
 
 - **Fix the UI under Home Assistant ingress** (the LAN URL worked, but the
