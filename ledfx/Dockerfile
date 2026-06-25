@@ -13,7 +13,7 @@ ENV LANG=C.UTF-8 \
     FRONTEND_URL=https://github.com/YeonV/LedFx-Frontend-v2/releases/download/2.1.6-b17/ledfx_frontend_hass.zip
 
 WORKDIR /tmp/build
-COPY requirements.txt patch_frontend.py ./
+COPY requirements.txt patch_frontend.py patch_backend.py ./
 
 # One layer: toolchain + audio/crypto headers to install ledfx and its native
 # deps, the runtime shared libs ledfx loads at import (portaudio, alsa), the
@@ -37,8 +37,11 @@ RUN set -eux; \
     SP="$(python3 -c 'import ledfx_frontend, os; print(os.path.dirname(ledfx_frontend.__file__))')"; \
     rm -rf "${SP:?}"/*; \
     cp -r ledfx_frontend_hass/* "$SP"/; \
-    # Make the UI talk to its own origin (ingress + LAN), de-brand the page title.
+    # Make the UI talk to its own origin (ingress + LAN), de-brand, declutter.
     python3 patch_frontend.py; \
+    # Patch the installed ledfx package: fix the delay/Sendspin-reset bug and
+    # de-Blade effect names.
+    python3 patch_backend.py; \
     # Trim.
     apt-get clean; \
     rm -rf /var/lib/apt/lists/* /root/.cache /tmp/build/*; \

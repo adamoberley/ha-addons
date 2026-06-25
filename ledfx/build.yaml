@@ -4,7 +4,6 @@
 build_from:
   aarch64: python:3.12-slim
   amd64: python:3.12-slim
-  armv7: python:3.12-slim
 
 labels:
   org.opencontainers.image.title: "LedFX"

@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.2.0 — 2026-06-25
+
+- **Fixed the audio-delay bug for real** (not just the option workaround). LedFX
+  had an upstream regression (from PR #1770) where changing the audio **delay**
+  silently reset the audio source from Sendspin to the default ALSA device, so the
+  lights went dead. The add-on now patches `ledfx/effects/audio.py` to merge a
+  partial audio update over the existing config *before* schema validation, so the
+  Sendspin device + name are preserved. The in-UI delay control works now, for all
+  callers (UI / REST / automations). The `sendspin_delay_ms` option stays one more
+  release as a safety net.
+- **De-Blade the effect names** — "Blade Power+" → "Power+" (etc.). These names
+  live in the LedFX *engine*, so it's a backend patch (`NAME = "Blade …"`).
+- **Decluttered Home** — hides the two rows of stat gauges and the external-links
+  (GitHub / Docs / Discord) button row for a cleaner dashboard.
+- **Sendspin always-on by default** — effects react the instant playback starts;
+  no need to open the UI to "wake" the audio.
+- **Lower idle CPU** — default `visualisation_fps` to 15 on the headless box (the
+  UI visualiser usually isn't open; raise it in Settings if you want).
+- **Dropped armv7** — Home Assistant stopped shipping 32-bit and the from-source
+  build breaks there; now aarch64 + amd64 only.
+
 ## 1.1.2 — 2026-06-25
 
 - **Fix the ingress reload loop** introduced in 1.1.1. Clearing the saved host on

@@ -33,6 +33,16 @@ except Exception:
 # Auto-scan for WLED on boot (default on; respect a later user change).
 cfg.setdefault("scan_on_startup", True)
 
+# Keep the Sendspin link warm so effects react the instant playback starts (no
+# need to open the UI / start an effect to wake audio). LedFX only actually
+# starts the pipeline when the active device is a Sendspin source, so it safely
+# no-ops until then.
+cfg.setdefault("sendspin_always_on", True)
+
+# Trim idle CPU on a headless box - the UI visualiser usually isn't open. The
+# user can raise it in Settings; live-applied, no restart.
+cfg.setdefault("visualisation_fps", 15)
+
 # Apply the Sendspin audio delay from the app options. The LedFX UI's delay
 # control is buggy for Sendspin (it resets the audio source), so we set it here
 # and leave whatever audio device is already selected untouched.

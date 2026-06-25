@@ -118,13 +118,27 @@ def patch_index() -> None:
         "localStorage.setItem('ledfx-hosts',JSON.stringify([b]));"
         "}catch(e){}</script>"
     )
+    # Declutter the Home dashboard: hide the two 8-gauge stat rows (.hideTablet)
+    # and the external-links FAB row (GitHub/Docs/Discord, anchored on the github
+    # Fab). Verified live against the running build. Color theming is intentionally
+    # left to the user (Settings has a theme picker) since it's subjective; we only
+    # hide whole sections by className, which is the reliable CSS lever here.
+    declutter = (
+        "<style>"
+        ".Content .hideTablet{display:none!important}"
+        '.Content .MuiStack-root:has(> .MuiFab-root[aria-label="github"]){display:none!important}'
+        "</style>"
+    )
+
     if cleaner not in html:
         html = html.replace("<head>", "<head>" + cleaner, 1)
+    if declutter not in html:
+        html = html.replace("<head>", "<head>" + declutter, 1)
 
     if html != original:
         with open(index, "w", encoding="utf-8") as handle:
             handle.write(html)
-        print("[patch] index.html: de-branded title + stale-host cleaner injected")
+        print("[patch] index.html: de-branded title + stale-host cleaner + declutter style injected")
 
 
 if __name__ == "__main__":
