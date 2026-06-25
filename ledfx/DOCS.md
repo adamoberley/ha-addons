@@ -60,13 +60,21 @@ loopback:
 
 ## Add your lights
 
-In **Devices**, LedFX auto-discovers WLED on your LAN (host networking is enabled
-for exactly this), or add one by IP. Create a **virtual**, drop an audio-reactive
-**effect** on it, and it'll move with the music. Save a **scene** to recall looks.
+LedFX **auto-scans for WLED on startup** (host networking is enabled for exactly
+this), so your devices show up in **Devices** on their own — there's no setup
+wizard. Need to scan again? **Settings → General → Scan on startup** (or just
+restart the add-on); you can also add a device by IP. Then drop an audio-reactive
+**effect** on a device and it'll move with the music. Save a **scene** to recall
+looks.
 
 > Heads-up: while an effect is active, LedFX takes **real-time control** of that
 > WLED — it'll override presets/automations using the same strip. Point LedFX at
 > the lights you want it to own.
+
+> **Seeing "2 devices" but only one card?** A device is the controller; the card
+> is its *virtual*. If a virtual didn't get created, restart the add-on (the
+> startup scan re-adds it) or re-add the device by IP. Giving each controller a
+> unique name avoids an ID collision that can drop the second virtual.
 
 ## Options
 
@@ -77,12 +85,28 @@ for exactly this), or add one by IP. Create a **virtual**, drop an audio-reactiv
 That's it — everything else is configured inside the LedFX UI and persists in the
 add-on's `/data`.
 
-## Control it from Home Assistant (optional)
+## Control it from Home Assistant
 
-LedFX has a built-in **Home Assistant (MQTT)** integration that exposes your
-virtuals, effects and scenes as HA entities (it uses MQTT discovery, so it pairs
-with your Mosquitto broker). Enable it from **Settings → Integrations** inside
-LedFX. You enter the MQTT credentials there yourself.
+This is set up **automatically** — no configuration. On start, the add-on reads
+your **Mosquitto** broker details from the Supervisor and turns on LedFX's
+built-in **Home Assistant (MQTT)** integration, so LedFX entities appear in HA via
+MQTT discovery with **no credentials to enter**. You get:
+
+- a **light** per virtual (on/off, plus colour when the effect is *Single Color*,
+  and effect selection),
+- **selects** for the active **scene**, **audio** input, and **transition** type,
+- a **Transition time** number, a global **Play/Pause** switch, and a **Used
+  Pixels** sensor.
+
+> **Scope:** this is LedFX's upstream integration and its controls are
+> deliberately limited — there's no per-effect parameter or dedicated brightness
+> entity. For richer dashboard control, a custom Lovelace card driving LedFX's
+> REST API is the way (a possible future addition). To turn the integration off,
+> disable it in **Settings → Integrations** inside LedFX — the add-on won't
+> re-enable a choice you've made.
+
+If your Mosquitto only exposes the TLS listener (8883), enable the plaintext
+**1883** listener too — LedFX's MQTT integration doesn't do TLS.
 
 ## Accessing the UI
 

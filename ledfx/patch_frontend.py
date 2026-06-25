@@ -1,33 +1,26 @@
 #!/usr/bin/env python3
-"""Make the bundled LedFX web UI work under Home Assistant ingress.
+"""Patch the bundled LedFX web UI for a clean, native Home Assistant experience.
 
-Two fixes are applied to the (minified) frontend, both required for it to run
-behind the HA ingress proxy *and* on the LAN:
+All edits are applied to the prebuilt (minified) HASS frontend at build time.
+Each replacement is guarded by a hit count and warns if a token isn't found, so
+a future frontend bump that moves an anchor fails loud instead of silent.
 
-1. Backend host. The stock frontend resolves its backend as:
+Fixes:
+1. Backend host - rewrite the hard-coded `http://localhost:8888` fallback to the
+   page's own origin, so the UI talks to the right backend under ingress + LAN.
+2. Router basename - `basename:"."` normalises to `"/."` and matches nothing
+   (blank page). Set it to `/`, which matches the router's `/` location under
+   both ingress and the LAN root.
+3. Skip onboarding - flip the persisted store default `intro:!0` (true) -> `!1`
+   (false) so the "Setup Assistant" wizard never shows. Devices auto-scan on
+   startup instead (scan_on_startup, set in run.sh); re-scan lives in Settings.
+   Anchored to `intro:!0,setIntro:` (unique) so the unrelated `intro:!0` icon
+   prop is left alone.
+4. De-Blade - blank the `blademod*.svg` asset (the "BLADE MOD" sidebar badge is
+   a vector asset, not inlined JS) and rename the "Blade Scene" onboarding text.
 
-       host = isStandaloneApp() ? "http://localhost:8888"
-                                : window.location.href.split("#")[0]
-
-   Behind ingress (and on first load) it can take the ``localhost:8888`` branch,
-   so every API call and the data WebSocket target the *browser's* machine.
-   We rewrite that hard-coded fallback to the page's own origin.
-
-2. Router basename. This is the HASS-optimised build (``PUBLIC_URL="."``), which
-   gives the relative asset paths ingress needs — but it also sets the React
-   Router to ``basename:"."``, which the router normalises to ``"/."``. No real
-   URL starts with ``/.``, so the router "won't render anything" → a blank page
-   (confirmed via the browser console). HA ingress serves the app so the router's
-   in-app location is ``/`` (and on the LAN it's also ``/``), so we set the
-   basename to a plain ``/`` — which matches in both cases. (A dynamic
-   ``document.baseURI`` basename does NOT work: under ingress baseURI is the full
-   ``/api/hassio_ingress/<token>/`` path, but the router's location is just ``/``,
-   so they don't match.)
-
-We also de-brand the page title and clear any stale cached ``localhost`` host
-(left in localStorage by the old add-on at the same Nabu Casa origin), so the
-frontend falls back to our same-origin default instead of ``localhost:8888``.
-Idempotent: safe to run more than once.
+We also de-brand the page title and clear any stale `localhost` backend host
+cached in localStorage by the old add-on at the same origin. Idempotent.
 """
 from __future__ import annotations
 
@@ -38,45 +31,69 @@ import ledfx_frontend
 
 ROOT = os.path.dirname(ledfx_frontend.__file__)
 
-# A JS expression yielding the current origin+path (hash stripped) - what the
-# non-standalone branch already uses.
+# (1) backend host -> current origin (hash stripped)
 ORIGIN_EXPR = '(window.location.href.split("#")[0])'
 HOST_FALLBACKS = ('"http://localhost:8888"', '"https://ledfx.local:8889"')
 
-# React Router basename: "." normalises to "/." and matches nothing -> blank page.
-# Under HA ingress the in-app router location is "/" (not the ingress path), and
-# on the LAN it's "/" too, so a plain "/" basename matches in both cases.
+# (2) router basename "." -> "/"
 BASENAME_BUG = 'basename:"."'
 BASENAME_FIX = 'basename:"/"'
 
+# (3) wizard store default intro:true -> false (anchored so the icon prop is safe)
+INTRO_BUG = "intro:!0,setIntro:"
+INTRO_FIX = "intro:!1,setIntro:"
+
+# (4) de-Blade onboarding text (longest first so substrings aren't half-replaced)
+BLADE_STRINGS = (
+    ("Skip Blade Scene", "Skip"),
+    ("Add Blade Scene", "Add Demo Scene"),
+    ("Blade Scene", "Demo Scene"),
+)
+
+# (4) the "BLADE MOD" sidebar badge is this vector asset; blank it out
+BLANK_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"/>'
+
+
+def _replace(src: str, old: str, new: str, label: str, expect=None) -> tuple[str, int]:
+    n = src.count(old)
+    if expect is not None and n != expect:
+        print(f"[patch] WARNING: {label}: expected {expect} hit(s), found {n} - frontend may have changed")
+    return src.replace(old, new), n
+
 
 def patch_js() -> None:
-    host_total = base_total = 0
     for path in glob.glob(os.path.join(ROOT, "static", "js", "*.js")):
         with open(path, encoding="utf-8") as handle:
             src = original = handle.read()
 
-        host_hits = sum(src.count(token) for token in HOST_FALLBACKS)
+        host_hits = sum(src.count(t) for t in HOST_FALLBACKS)
         for token in HOST_FALLBACKS:
             src = src.replace(token, ORIGIN_EXPR)
 
-        base_hits = src.count(BASENAME_BUG)
-        src = src.replace(BASENAME_BUG, BASENAME_FIX)
+        src, base_hits = _replace(src, BASENAME_BUG, BASENAME_FIX, "basename")
+        src, intro_hits = _replace(src, INTRO_BUG, INTRO_FIX, "intro/wizard")
+        blade_hits = 0
+        for old, new in BLADE_STRINGS:
+            src, n = _replace(src, old, new, f"blade-text {old!r}")
+            blade_hits += n
 
         if src != original:
             with open(path, "w", encoding="utf-8") as handle:
                 handle.write(src)
-            host_total += host_hits
-            base_total += base_hits
-            print(
-                f"[patch] {os.path.basename(path)}: "
-                f"{host_hits} host fallback(s), {base_hits} router-basename fix(es)"
-            )
+            name = os.path.basename(path)
+            print(f"[patch] {name}: host={host_hits} basename={base_hits} "
+                  f"intro={intro_hits} blade-text={blade_hits}")
 
-    if not host_total:
-        print("[patch] WARNING: no localhost host fallbacks found - frontend may have changed")
-    if not base_total:
-        print("[patch] WARNING: no 'basename:\".\"' found - the blank-page fix did NOT apply")
+
+def patch_assets() -> None:
+    found = False
+    for path in glob.glob(os.path.join(ROOT, "static", "media", "*blademod*.svg")):
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(BLANK_SVG)
+        found = True
+        print(f"[patch] blanked Blade badge asset: {os.path.basename(path)}")
+    if not found:
+        print("[patch] note: no blademod*.svg found (sidebar badge may have moved)")
 
 
 def patch_index() -> None:
@@ -103,4 +120,5 @@ def patch_index() -> None:
 
 if __name__ == "__main__":
     patch_js()
+    patch_assets()
     patch_index()

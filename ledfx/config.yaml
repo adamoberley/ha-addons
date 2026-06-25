@@ -10,7 +10,7 @@
 # localhost), the engine binds the LAN so direct access works too, and the
 # packaging is de-branded.
 name: LedFX
-version: "1.0.3"
+version: "1.1.0"
 slug: ledfx
 description: >-
   Native LedFX for Home Assistant - real-time, audio-reactive lighting for WLED
@@ -45,6 +45,14 @@ host_network: true
 # host_dbus assists local device discovery.
 audio: true
 host_dbus: true
+
+# Auto-configure the Home Assistant MQTT integration from the co-located
+# Mosquitto broker - run.sh reads the broker host/credentials the Supervisor
+# injects for this service and seeds them into LedFX, so there's nothing to type.
+# "want" = use the broker if present, still start if it's absent. The Supervisor
+# allows /services/* with just this declaration (no hassio_api needed).
+services:
+  - mqtt:want
 
 options:
   log_level: info
