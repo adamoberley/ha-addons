@@ -5,11 +5,11 @@
 - **Fix ingress host flapping / "404, no core" after a while.** The frontend
   keeps the backend URL in `localStorage`, but the HA ingress token rotates each
   session, so a saved host (a stale token URL, the bare Nabu Casa origin,
-  `localhost`, the LAN IP) goes 404. The add-on now clears the saved host +
+  `localhost`, the LAN IP) goes 404. The app now clears the saved host +
   Known-Hosts list on every load, so the UI always talks to the **live origin**.
-- **Sendspin audio delay option.** New `sendspin_delay_ms` add-on option. LedFX's
+- **Sendspin audio delay option.** New `sendspin_delay_ms` app option. LedFX's
   in-UI delay control is buggy for Sendspin (it silently resets the audio source),
-  so set the delay here instead — the add-on applies it on start and keeps the
+  so set the delay here instead — the app applies it on start and keeps the
   Sendspin device selected. (0–5000 ms; restart to apply.)
 
 ## 1.1.0 — 2026-06-25
@@ -17,7 +17,7 @@
 A polish release: zero-config Home Assistant control, no onboarding friction, and
 clean branding.
 
-- **Home Assistant MQTT integration ON by default, auto-configured.** The add-on
+- **Home Assistant MQTT integration ON by default, auto-configured.** The app
   now declares `services: mqtt:want` and, on start, reads the Mosquitto broker
   host/credentials the Supervisor provides and seeds LedFX's `mqtt_hass`
   integration — **no credentials to type**. It connects on the plaintext `1883`
@@ -41,7 +41,7 @@ clean branding.
     is `/`, so the previous dynamic mount-path basename (the full
     `/api/hassio_ingress/<token>/`) didn't match and rendered nothing.
   - **Stale backend host** — clear a `localhost:8888` host left in `localStorage`
-    (`ledfx-host` / `ledfx-frontend`) by the old add-on at the same Nabu Casa
+    (`ledfx-host` / `ledfx-frontend`) by the old app at the same Nabu Casa
     origin, so the UI talks to its own origin instead of issuing blocked
     mixed-content `ws://localhost:8888` / `http://localhost:8888` calls.
 
@@ -64,7 +64,7 @@ clean branding.
 
 ## 1.0.0 — 2026-06-25
 
-First release — a clean, HA-native fork of the community LedFX add-on.
+First release — a clean, HA-native fork of the community LedFX app.
 
 - **Ships the LedFX engine pinned just past 2.1.9** (upstream commit `90bebef8`)
   with the ingress-ready official web UI. The post-release pin brings the
@@ -75,10 +75,10 @@ First release — a clean, HA-native fork of the community LedFX add-on.
   own origin instead of a hard-coded `localhost:8888`, and a stale cached host is
   cleared automatically.
 - **Reachable on the LAN.** The engine binds `0.0.0.0`, so `http://<ha-ip>:8888`
-  works directly — the old add-on bound `127.0.0.1` and was unreachable.
+  works directly — the old app bound `127.0.0.1` and was unreachable.
 - **Audio via Sendspin.** Designed to take its audio from Music Assistant over the
   Sendspin protocol — no sound card, no second machine, no VBAN-from-a-PC.
 - **De-branded** packaging: clean name, icon, logo, and panel; no devil-emoji icon
-  or "Blade" add-on branding. (The upstream LedFX UI is unchanged.)
+  or "Blade" app branding. (The upstream LedFX UI is unchanged.)
 - **Quieter, simpler config:** a single `log_level` option; everything else lives
   in the LedFX UI and persists in `/data`.

@@ -1,4 +1,4 @@
-# REFRAMED Gallery - Home Assistant add-on manifest.
+# REFRAMED Gallery - Home Assistant app manifest.
 #
 # A long-running service that pulls curated public-domain art from reframed.gallery
 # (or the Art Institute of Chicago), fits it to your Frame TV's panel, and pushes
@@ -41,7 +41,7 @@ map:
 # weather entity's condition. Only used when weather_entity is set.
 homeassistant_api: true
 
-# MQTT (auto-detected from the Mosquitto add-on) powers the HA entities:
+# MQTT (auto-detected from the Mosquitto app) powers the HA entities:
 # a Current Art sensor, a Next button, a Collection select, and a Matte select.
 services:
   - mqtt:want
@@ -119,7 +119,7 @@ schema:
   # Don't repeat the last N pieces (0 = allow repeats).
   avoid_repeat_count: "int(0,5000)"
   # Expose HA entities (Current Art sensor, Next button, Collection select) over MQTT
-  # discovery. Leave the MQTT fields blank to auto-detect the Mosquitto add-on.
+  # discovery. Leave the MQTT fields blank to auto-detect the Mosquitto app.
   enable_mqtt: "bool"
   mqtt_host: "str?"
   mqtt_port: "port"

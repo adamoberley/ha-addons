@@ -98,10 +98,10 @@ configuration:
     description: >-
       Expose a Current Art sensor, a Next button, and a Collection select to Home
       Assistant via MQTT discovery, so you can automate the gallery. Requires the
-      Mosquitto broker add-on (or your own).
+      Mosquitto broker app (or your own).
   mqtt_host:
     name: MQTT host
-    description: Leave blank to auto-detect the Mosquitto broker add-on. Set it for an external broker.
+    description: Leave blank to auto-detect the Mosquitto broker app. Set it for an external broker.
   mqtt_port:
     name: MQTT port
     description: MQTT broker port (default 1883). Only used with a manual host.

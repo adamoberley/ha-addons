@@ -1,4 +1,4 @@
-# Labels + help shown on the add-on's Configuration tab.
+# Labels + help shown on the app's Configuration tab.
 configuration:
   cameras:
     name: Cameras
@@ -75,11 +75,11 @@ configuration:
     name: Publish HA sensor (MQTT)
     description: >-
       Expose a "Recognized Name" sensor to Home Assistant via MQTT discovery so
-      you can automate off it. Requires the Mosquitto broker add-on (or your own).
+      you can automate off it. Requires the Mosquitto broker app (or your own).
   mqtt_host:
     name: MQTT host
     description: >-
-      Leave blank to auto-detect the Mosquitto broker add-on. Set it only to use
+      Leave blank to auto-detect the Mosquitto broker app. Set it only to use
       an external broker.
   mqtt_port:
     name: MQTT port

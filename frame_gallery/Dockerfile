@@ -1,6 +1,6 @@
 # Pin the Debian base directly. The Supervisor was not honoring build.yaml's
 # `build_from` and fell back to its Alpine base image, where run.sh's `bash`
-# shebang fails ("bash: not found") and the add-on never starts. python:3.12-slim
+# shebang fails ("bash: not found") and the app never starts. python:3.12-slim
 # is multi-arch (amd64/arm64/armv7) and matches build.yaml.
 FROM python:3.12-slim
 

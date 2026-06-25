@@ -2,5 +2,5 @@ configuration:
   log_level:
     name: Log level
     description: >-
-      How much LedFX writes to the add-on log. Use info for normal running;
+      How much LedFX writes to the app log. Use info for normal running;
       switch to debug only while troubleshooting (it is very chatty), then back.

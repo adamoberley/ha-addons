@@ -74,7 +74,7 @@ def _ensure(spec: dict, custom_url: str = "", what: str = "") -> str:
         raise RuntimeError(
             f"the '{what}' model is not bundled (non-commercial license). Download "
             f"{spec['filename']} from its source, accept its license, then place it at "
-            f"{path} or set recognition_model_url. See the add-on docs."
+            f"{path} or set recognition_model_url. See the app docs."
         )
     _download(url, path, spec["min_size"])
     return path

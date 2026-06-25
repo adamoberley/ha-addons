@@ -1,13 +1,13 @@
 """Expose REFRAMED Gallery to Home Assistant over MQTT (optional, automatable).
 
 Publishes via MQTT discovery (auto-detecting the Mosquitto broker, or a manual
-host), and subscribes to the command topics so HA can drive the add-on:
+host), and subscribes to the command topics so HA can drive the app:
   - sensor.reframed_gallery_current_art  - current title (+ artist/year/medium/... attrs)
   - button.reframed_gallery_next         - press to change art now
   - select.reframed_gallery_collection   - switch season/collection live
   - select.reframed_gallery_matte        - switch the TV-rendered matte live
 
-If MQTT is unavailable the add-on still runs (the panel + interval are unaffected).
+If MQTT is unavailable the app still runs (the panel + interval are unaffected).
 """
 from __future__ import annotations
 
@@ -82,7 +82,7 @@ class MqttCtl:
         host, port, user, pw = self._resolve()
         if not host:
             log.warning("MQTT unavailable - HA entities disabled (install the Mosquitto "
-                        "broker add-on, or set mqtt_host)")
+                        "broker app, or set mqtt_host)")
             return
         import paho.mqtt.client as mqtt
 

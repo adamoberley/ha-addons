@@ -1,4 +1,4 @@
-"""Add-on options, read from /data/options.json (written by the Supervisor)."""
+"""App options, read from /data/options.json (written by the Supervisor)."""
 from __future__ import annotations
 
 import json

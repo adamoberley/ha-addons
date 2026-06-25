@@ -33,7 +33,7 @@ except Exception:
 # Auto-scan for WLED on boot (default on; respect a later user change).
 cfg.setdefault("scan_on_startup", True)
 
-# Apply the Sendspin audio delay from the add-on options. The LedFX UI's delay
+# Apply the Sendspin audio delay from the app options. The LedFX UI's delay
 # control is buggy for Sendspin (it resets the audio source), so we set it here
 # and leave whatever audio device is already selected untouched.
 try:
@@ -101,7 +101,7 @@ else:
 json.dump(cfg, open(CONFIG, "w"), indent=2)
 PY
 
-# Map the add-on's log_level option to ledfx verbosity.
+# Map the app's log_level option to ledfx verbosity.
 log_level="$(python3 -c 'import json; print(json.load(open("/data/options.json")).get("log_level","info"))' 2>/dev/null || echo info)"
 case "$log_level" in
   debug)   verbosity="-vv" ;;

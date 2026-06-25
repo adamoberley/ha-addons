@@ -1,11 +1,11 @@
 """Publish a "Recognized Name" sensor per camera (plus an aggregate) over MQTT.
 
 Broker details come from the Supervisor's MQTT service automatically (so the
-Mosquitto add-on just works), or from the add-on options for an external broker.
+Mosquitto app just works), or from the app options for an external broker.
 Each camera gets sensor.local_faces_<slug>; sensor.local_faces_recognized_name is
 kept as an "anyone known, any camera" aggregate for backward compatibility. We
 publish retained discovery once, then state per camera. This is the only thing
-that creates HA entities - if MQTT isn't available the add-on still runs
+that creates HA entities - if MQTT isn't available the app still runs
 (dashboard, log, notify).
 """
 from __future__ import annotations
@@ -70,7 +70,7 @@ class MqttPublisher:
         host, port, user, password = self._resolve()
         if not host:
             log.warning("MQTT unavailable - the 'Recognized Name' sensors will be disabled "
-                        "(install the Mosquitto broker add-on, or set mqtt_host)")
+                        "(install the Mosquitto broker app, or set mqtt_host)")
             return
         import paho.mqtt.client as mqtt
 

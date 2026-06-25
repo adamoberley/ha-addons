@@ -1,6 +1,6 @@
-# Home Assistant add-on (app) repository metadata.
-# Install: Settings -> Add-ons -> Add-on Store -> (top-right) Repositories ->
+# Home Assistant app repository metadata.
+# Install: Settings -> Apps -> App Store -> (top-right) Repositories ->
 # paste this repo's URL -> "Frame Gallery" appears under this name.
-name: Adam Oberley's Home Assistant Add-ons
+name: Adam Oberley's Home Assistant Apps
 url: https://github.com/adamoberley/ha-addons
 maintainer: Adam Oberley <adamoberley@damascus.net>

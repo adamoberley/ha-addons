@@ -1,6 +1,6 @@
 """Optional push notification on a recognition, via a Home Assistant notify service.
 
-Calls the HA core API with the add-on's Supervisor token, so a phone ping is the
+Calls the HA core API with the app's Supervisor token, so a phone ping is the
 one thing that may leave your network (whatever your notify service does with it).
 Blank notify_service disables it entirely.
 """

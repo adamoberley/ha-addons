@@ -23,7 +23,7 @@ instead of bolting on a cloud account or a second machine.
 All three live in this single repository. Add it once, then install whichever you
 want:
 
-1. **Settings → Apps (Add-ons) → App (Add-on) Store → ⋮ (top-right) → Repositories**:
+1. **Settings → Apps → App Store → ⋮ (top-right) → Repositories**:
 
    [![Add repository to your Home Assistant.](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fadamoberley%2Fha-addons)
 

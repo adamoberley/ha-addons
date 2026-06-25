@@ -1,11 +1,11 @@
-# LedFX - Home Assistant add-on manifest.
+# LedFX - Home Assistant app manifest.
 #
 # Runs the LedFX engine (the real-time, audio-reactive LED controller) natively
 # on Home Assistant OS - no second machine, no USB sound card. It drives WLED
 # (and other) devices and takes its audio over the network from Music Assistant
 # via the Sendspin protocol, so effects react in sync with whatever's playing.
 #
-# This is a clean fork of the community LedFx add-on, fixed for a first-class
+# This is a clean fork of the community LedFx app, fixed for a first-class
 # HAOS experience: the web UI works under Home Assistant ingress (not just on
 # localhost), the engine binds the LAN so direct access works too, and the
 # packaging is de-branded.
@@ -37,7 +37,7 @@ panel_title: LedFX
 
 # host_network lets LedFX see the real LAN: auto-discover WLED devices and the
 # Music Assistant Sendspin server, and stream realtime pixel data to your lights.
-# Without it, LedFX would only see the add-on's private Docker subnet.
+# Without it, LedFX would only see the app's private Docker subnet.
 host_network: true
 
 # Sendspin delivers audio over the network, so no sound card is needed - but
@@ -63,6 +63,6 @@ schema:
   log_level: list(debug|info|warning|error)
   # Audio delay (ms) applied to the Sendspin input, to line the lights up with
   # your speakers. Set it here instead of in the LedFX UI: the UI's delay control
-  # is buggy for Sendspin (it resets the audio source), so the add-on applies
+  # is buggy for Sendspin (it resets the audio source), so the app applies
   # this value on start and keeps the Sendspin device selected. Restart to apply.
   sendspin_delay_ms: int(0,5000)

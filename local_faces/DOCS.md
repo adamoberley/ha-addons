@@ -6,7 +6,7 @@ HA as a sensor you can automate off. It runs entirely on the CPU and is light
 enough for a Raspberry Pi 4/5 — no GPU, no cloud, no per-face subscription.
 
 **Everything stays local.** Detection, enrollment, and the recognition log all
-live in the add-on's `/data`. The only thing that can ever leave your network is
+live in the app's `/data`. The only thing that can ever leave your network is
 an optional push notification (and only if you turn one on).
 
 ## How it works
@@ -41,7 +41,7 @@ for you. Obtain `w600k_mbf.onnx` from the InsightFace `buffalo_s` release, then
 either:
 
 - drop the file at `/data/models/w600k_mbf.onnx` (e.g. via the *Samba*/*SSH*
-  add-on), or
+  app), or
 - set **Recognition model URL** to a direct link you control.
 
 Switching models is safe: **enrollments are kept per model**, so the first time
@@ -57,13 +57,13 @@ model — `sface` is good at `0.363`; for `mobilefacenet_w600k` start lower (aro
 
 ## Setup
 
-1. **Install an MQTT broker** (the official *Mosquitto broker* add-on) if you
+1. **Install an MQTT broker** (the official *Mosquitto broker* app) if you
    want the HA sensor. Local Faces auto-detects it — no broker config needed.
 2. **Set the camera URL** in the Configuration tab:
    - `stream` mode: an RTSP URL like `rtsp://user:pass@192.168.1.50/stream`, or
      an HTTP/MJPEG stream.
    - `snapshot` mode: a still-image URL that returns a fresh JPEG per request.
-3. **Start the add-on** and open it (sidebar → **Local Faces**). The dashboard
+3. **Start the app** and open it (sidebar → **Local Faces**). The dashboard
    shows a live view, who's enrolled, and recent sightings.
 4. **Enroll** each person, two ways:
    - **Capture or upload:** type a name, hit **Capture from camera** (best — uses

@@ -1,4 +1,4 @@
-# Local Faces - Home Assistant add-on manifest.
+# Local Faces - Home Assistant app manifest.
 #
 # Open-source, on-device face recognition. Pulls frames from a camera, detects
 # faces with YuNet and matches them to people you enroll from the dashboard with
@@ -29,7 +29,7 @@ panel_icon: mdi:face-recognition
 panel_title: Local Faces
 
 # The "Recognized Name" sensor is published via MQTT discovery; auto-configures
-# from the Mosquitto broker add-on. Push notifications use the HA core API.
+# from the Mosquitto broker app. Push notifications use the HA core API.
 services:
   - mqtt:want
 homeassistant_api: true
@@ -94,7 +94,7 @@ schema:
   notify_unknown: "bool"
   # Publish the "Recognized Name" sensor over MQTT.
   enable_mqtt: "bool"
-  # Leave MQTT fields blank to auto-detect the Mosquitto broker add-on; or set
+  # Leave MQTT fields blank to auto-detect the Mosquitto broker app; or set
   # them to point at your own broker.
   mqtt_host: "str?"
   mqtt_port: "port"

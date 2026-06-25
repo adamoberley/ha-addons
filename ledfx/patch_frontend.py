@@ -20,7 +20,7 @@ Fixes:
    a vector asset, not inlined JS) and rename the "Blade Scene" onboarding text.
 
 We also de-brand the page title and clear any stale `localhost` backend host
-cached in localStorage by the old add-on at the same origin. Idempotent.
+cached in localStorage by the old app at the same origin. Idempotent.
 """
 from __future__ import annotations
 
