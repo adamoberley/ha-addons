@@ -46,7 +46,7 @@ PAGE = b"""<!doctype html>
   body { margin:0; background:var(--bg); color:var(--text);
          font-family:var(--sans); line-height:1.5;
          padding:16px; -webkit-font-smoothing:antialiased; }
-  .wrap { max-width:960px; margin:0 auto; }
+  .wrap { max-width:1200px; margin:0 auto; }
 
   .topbar { display:flex; align-items:center; justify-content:space-between;
             gap:12px; margin:4px 4px 16px; }
@@ -65,7 +65,7 @@ PAGE = b"""<!doctype html>
   .pill.alert .dot { background:var(--error); }
 
   /* Camera tiles */
-  .cams { display:grid; gap:16px; margin-bottom:16px;
+  .cams { display:grid; gap:16px;
           grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); }
   .cam { position:relative; aspect-ratio:16/9; background:var(--screen);
          border-radius:var(--r); overflow:hidden; box-shadow:var(--shadow);
@@ -92,14 +92,13 @@ PAGE = b"""<!doctype html>
                 font-size:14px; background:var(--card); box-shadow:var(--shadow);
                 border:1px solid var(--card-border); border-radius:var(--r); }
 
-  /* Body grid */
-  .grid { display:grid; gap:16px; grid-template-columns:1fr 1fr;
-          grid-template-areas:"enroll sightings" "people sightings"; }
-  .enroll { grid-area:enroll; } .people { grid-area:people; }
-  .sightings { grid-area:sightings; }
-  @media (max-width:720px) {
-    .grid { grid-template-columns:1fr; grid-template-areas:"enroll" "people" "sightings"; }
-  }
+  /* Desktop: live preview on the left, controls stacked to its right.
+     Narrow screens collapse to one column with the preview on top. */
+  .layout { display:grid; gap:16px; align-items:start;
+            grid-template-columns:minmax(0,1.15fr) minmax(0,1fr); }
+  .panel { display:grid; gap:16px; align-content:start; }
+  @media (min-width:861px) { .cams { position:sticky; top:16px; } }
+  @media (max-width:860px) { .layout { grid-template-columns:1fr; } }
 
   .card { background:var(--card); border:1px solid var(--card-border);
           border-radius:var(--r); box-shadow:var(--shadow); padding:16px; }
@@ -150,8 +149,31 @@ PAGE = b"""<!doctype html>
           font-size:13px; font-weight:500; cursor:pointer; }
   .link:hover { text-decoration:underline; }
   .link.danger { color:var(--error); }
-  .nameform { display:flex; gap:7px; width:100%; margin-top:8px; }
-  .nameform input { flex:1; }
+  /* Sightings: a row is a button to blow the face up and name it */
+  .item.click { cursor:pointer; border-radius:8px;
+                transition:background .15s; }
+  .item.click:hover { background:var(--primary-soft); }
+
+  /* Lightbox: big face + name field underneath */
+  .modal { position:fixed; inset:0; z-index:50; display:flex;
+           align-items:center; justify-content:center; padding:16px;
+           background:rgba(0,0,0,.6); }
+  .modal[hidden] { display:none; }
+  .modal-card { position:relative; width:100%; max-width:340px;
+                background:var(--card); border:1px solid var(--card-border);
+                border-radius:var(--r); box-shadow:var(--shadow); padding:20px; }
+  .modal-x { position:absolute; top:8px; right:8px; width:32px; height:32px;
+             font-size:20px; line-height:1; padding:0; border-radius:8px;
+             background:transparent; color:var(--secondary); border:0; cursor:pointer; }
+  .modal-x:hover { background:var(--field); color:var(--text); }
+  .modal-img { display:block; width:100%; max-width:280px; margin:0 auto 14px;
+               aspect-ratio:1/1; object-fit:cover; border-radius:12px;
+               border:2px solid var(--primary); background:var(--field); }
+  .modal-img.unknown { border-color:var(--error); }
+  .modal-meta { text-align:center; font-size:13px; color:var(--secondary);
+                margin-bottom:16px; }
+  .modal .btns { margin-top:14px; }
+  .modal .btns button { flex:1; text-align:center; }
 
   @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:.35;} }
 </style>
@@ -168,55 +190,78 @@ PAGE = b"""<!doctype html>
     <span class="pill" id="pill"><span class="dot"></span><span id="pillText">Starting</span></span>
   </div>
 
-  <div class="cams" id="cams">
-    <div class="empty-cams" id="emptyCams" style="display:none">
-      No cameras configured. Add one on the Configuration tab, then restart.
+  <div class="layout">
+
+    <div class="cams" id="cams">
+      <div class="empty-cams" id="emptyCams" style="display:none">
+        No cameras configured. Add one on the Configuration tab, then restart.
+      </div>
     </div>
-  </div>
 
-  <div class="grid">
+    <div class="panel">
 
-    <section class="card enroll">
-      <h2>Enroll a face</h2>
-      <p class="lead">Press <b>Capture</b> on a camera above, or upload a clear photo,
-         then give it a name. A few angles per person works best.</p>
+      <section class="card enroll">
+        <h2>Enroll a face</h2>
+        <p class="lead">Press <b>Capture</b> on a camera, or upload a clear photo,
+           then give it a name. A few angles per person works best.</p>
 
-      <div class="field">
-        <label class="lbl" for="name">Name</label>
-        <input type="text" id="name" placeholder="e.g. Alex" autocomplete="off">
-      </div>
+        <div class="field">
+          <label class="lbl" for="name">Name</label>
+          <input type="text" id="name" list="names" placeholder="e.g. Alex" autocomplete="off">
+        </div>
 
-      <div class="btns" id="captureBtns">
-        <button class="btn-ghost" id="pick">Upload photo</button>
-        <input type="file" id="file" accept="image/*" hidden>
-      </div>
+        <div class="btns" id="captureBtns">
+          <button class="btn-ghost" id="pick">Upload photo</button>
+          <input type="file" id="file" accept="image/*" hidden>
+        </div>
 
-      <div class="review" id="review">
-        <img id="reviewThumb" alt="Captured face">
-        <div class="rc">
-          <div class="lbl">Captured face</div>
-          <div class="btns" style="margin-top:8px">
-            <button class="btn-primary" id="save">Save face</button>
-            <button class="btn-ghost" id="retake">Discard</button>
+        <div class="review" id="review">
+          <img id="reviewThumb" alt="Captured face">
+          <div class="rc">
+            <div class="lbl">Captured face</div>
+            <div class="btns" style="margin-top:8px">
+              <button class="btn-primary" id="save">Save face</button>
+              <button class="btn-ghost" id="retake">Discard</button>
+            </div>
           </div>
         </div>
-      </div>
 
-      <div class="msg" id="msg" aria-live="polite">&nbsp;</div>
-    </section>
+        <div class="msg" id="msg" aria-live="polite">&nbsp;</div>
+      </section>
 
-    <section class="card people">
-      <h2>Known people</h2>
-      <ul class="list" id="people"></ul>
-    </section>
+      <section class="card people">
+        <h2>Known people</h2>
+        <ul class="list" id="people"></ul>
+      </section>
 
-    <section class="card sightings">
-      <h2>Recent sightings</h2>
-      <p class="lead">Every recognized and unknown face, with its camera. See an
-         unknown you know? Name it here and they'll be recognized next time.</p>
-      <ul class="list" id="log"></ul>
-    </section>
+      <section class="card sightings">
+        <h2>Recent sightings</h2>
+        <p class="lead">Every recognized and unknown face, with its camera. Click a
+           sighting to enlarge it and put a name to the face - naming more shots of
+           the same person sharpens their recognition.</p>
+        <ul class="list" id="log"></ul>
+      </section>
 
+    </div>
+  </div>
+</div>
+
+<datalist id="names"></datalist>
+
+<div class="modal" id="modal" hidden>
+  <div class="modal-card">
+    <button class="modal-x" id="modalX" aria-label="Close">&times;</button>
+    <img class="modal-img" id="modalImg" alt="Sighting face">
+    <div class="modal-meta" id="modalMeta"></div>
+    <div class="field">
+      <label class="lbl" for="modalName">Name this face</label>
+      <input type="text" id="modalName" list="names" placeholder="Type or pick a name" autocomplete="off">
+    </div>
+    <div class="btns">
+      <button class="btn-primary" id="modalSave">Save</button>
+      <button class="btn-ghost" id="modalCancel">Cancel</button>
+    </div>
+    <div class="msg" id="modalMsg" aria-live="polite">&nbsp;</div>
   </div>
 </div>
 
@@ -305,9 +350,16 @@ PAGE = b"""<!doctype html>
       im.src="data:image/jpeg;base64,"+b64; im.alt=""; return im; }
     var sp=document.createElement("span"); sp.className="thumb"+(unknown?" unknown":""); return sp;
   }
+  function setNameOptions(names){
+    var dl=el("names"); dl.innerHTML="";
+    names.forEach(function(n){
+      var o=document.createElement("option"); o.value=n; dl.appendChild(o);
+    });
+  }
   function refreshPeople(){
     api("people").then(function(d){
       var ul=el("people"); ul.innerHTML="";
+      setNameOptions((d.people||[]).map(function(p){ return p.name; }));
       if(!d.people.length){
         var li=document.createElement("li");
         li.className="empty"; li.textContent="Nobody enrolled yet. Capture a face to begin.";
@@ -333,7 +385,7 @@ PAGE = b"""<!doctype html>
     }).catch(function(){});
   }
 
-  // ---- sightings (camera-tagged, with name-from-log) ----
+  // ---- sightings (camera-tagged; click a row to blow it up and name it) ----
   function refreshLog(){
     api("log").then(function(d){
       var ul=el("log"); ul.innerHTML="";
@@ -343,7 +395,8 @@ PAGE = b"""<!doctype html>
         ul.appendChild(li); return;
       }
       d.events.forEach(function(e){
-        var li=document.createElement("li"); li.className="item";
+        var li=document.createElement("li"); li.className="item click";
+        li.title="Click to enlarge and name";
         li.appendChild(makeThumb(e.thumb, e.unknown));
         var col=document.createElement("div"); col.className="col";
         var top=document.createElement("div");
@@ -358,43 +411,48 @@ PAGE = b"""<!doctype html>
         var meta=document.createElement("div"); meta.className="meta";
         meta.textContent=(e.camera?e.camera+" - ":"")+fmtTime(e.ts);
         col.appendChild(top); col.appendChild(meta); li.appendChild(col);
-
-        if(e.unknown){
-          var name=document.createElement("button"); name.className="link";
-          name.textContent="Name";
-          name.addEventListener("click", function(){ openNameForm(li, col, e.id, name); });
-          li.appendChild(name);
-        }
+        li.addEventListener("click", function(){ openSighting(e); });
         ul.appendChild(li);
       });
     }).catch(function(){});
   }
 
-  function openNameForm(li, col, id, trigger){
-    trigger.style.display="none";
-    var form=document.createElement("div"); form.className="nameform";
-    var input=document.createElement("input"); input.type="text";
-    input.placeholder="Who is this?";
-    var save=document.createElement("button");
-    save.className="btn-primary"; save.textContent="Save";
-    var cancel=document.createElement("button");
-    cancel.className="btn-ghost"; cancel.textContent="X";
-    form.appendChild(input); form.appendChild(save); form.appendChild(cancel);
-    col.appendChild(form); input.focus();
-    function close(){ form.remove(); trigger.style.display=""; }
-    cancel.addEventListener("click", close);
-    function submit(){
-      var n=input.value.trim(); if(!n){ input.focus(); return; }
-      save.disabled=true;
-      api("sighting/name?id="+encodeURIComponent(id)+"&name="+encodeURIComponent(n),
-          {method:"POST"}).then(function(r){
-        setMsg(r.message, r.ok?"ok":"err");
-        if(r.ok){ refreshPeople(); refreshLog(); } else { save.disabled=false; }
-      });
-    }
-    save.addEventListener("click", submit);
-    input.addEventListener("keydown", function(ev){ if(ev.key==="Enter") submit(); });
+  // ---- sighting lightbox: enlarge, then name (known names autocomplete) ----
+  var modalEvent=null;
+  function setModalMsg(t, kind){ var m=el("modalMsg"); m.textContent=t||" ";
+    m.className="msg"+(kind?(" "+kind):""); }
+  function openSighting(e){
+    modalEvent=e;
+    var img=el("modalImg");
+    img.src=e.thumb?("data:image/jpeg;base64,"+e.thumb):"";
+    img.className="modal-img"+(e.unknown?" unknown":"");
+    el("modalMeta").textContent=
+      (e.unknown?"Unknown":(e.name+"  "+pct(e.score)))
+      +"  -  "+(e.camera?e.camera+" - ":"")+fmtTime(e.ts);
+    var input=el("modalName");
+    input.value=e.unknown?"":(e.name||"");
+    setModalMsg(""); el("modalSave").disabled=false;
+    el("modal").hidden=false; input.focus();
   }
+  function closeModal(){ el("modal").hidden=true; modalEvent=null; }
+  function saveSighting(){
+    if(!modalEvent) return;
+    var n=el("modalName").value.trim();
+    if(!n){ setModalMsg("Enter a name for this face.","err"); el("modalName").focus(); return; }
+    el("modalSave").disabled=true;
+    api("sighting/name?id="+encodeURIComponent(modalEvent.id)+"&name="+encodeURIComponent(n),
+        {method:"POST"}).then(function(r){
+      if(r.ok){ setMsg(r.message,"ok"); closeModal(); refreshPeople(); refreshLog(); }
+      else { setModalMsg(r.message||"Could not save.","err"); el("modalSave").disabled=false; }
+    }).catch(function(){ setModalMsg("Save failed. Try again.","err"); el("modalSave").disabled=false; });
+  }
+  el("modalSave").addEventListener("click", saveSighting);
+  el("modalCancel").addEventListener("click", closeModal);
+  el("modalX").addEventListener("click", closeModal);
+  el("modal").addEventListener("click", function(ev){ if(ev.target===el("modal")) closeModal(); });
+  el("modalName").addEventListener("keydown", function(ev){ if(ev.key==="Enter") saveSighting(); });
+  document.addEventListener("keydown", function(ev){
+    if(ev.key==="Escape" && !el("modal").hidden) closeModal(); });
 
   // ---- enrollment: capture (per camera) / upload -> review -> save ----
   function showReview(thumbB64, token){

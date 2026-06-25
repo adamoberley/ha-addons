@@ -1,5 +1,19 @@
 # Changelog
 
+## Local Faces 0.5.0 — 2026-06-25
+
+- **Desktop split layout** — on wider screens the live camera preview now sits in
+  a left column with Enroll, Known people, and Recent sightings stacked to its
+  right (instead of below it), and the preview stays in view while you scroll the
+  list. Narrow screens keep the single-column layout with the preview on top.
+- **Click a sighting to name it** — every recent sighting opens a lightbox with a
+  blown-up face and a name field right underneath. It works on recognized faces
+  too, not just unknowns: confirming more shots of the same person enrolls them as
+  extra samples, sharpening that face's recognition over time.
+- **Name autocomplete** — already-enrolled names are suggested as you type, in both
+  the enroll field and the sighting lightbox, so adding several photos to one
+  person stays quick and consistent.
+
 ## LedFX 1.0.1 — 2026-06-25
 
 - Fix a startup crash on boxes with no sound card ("tuple index out of range" in

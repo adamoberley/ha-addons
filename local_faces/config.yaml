@@ -6,7 +6,7 @@
 # HA as a sensor over MQTT; recognition, enrollment, and the log never leave the
 # box (only an optional push notification does).
 name: Local Faces
-version: "0.4.1"
+version: "0.5.0"
 slug: local_faces
 description: >-
   On-device, open-source face recognition. Enroll people from a dashboard;
