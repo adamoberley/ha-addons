@@ -1,9 +1,13 @@
-# Build helpers + the LedFX engine. python-mbedtls provides the crypto Sendspin
-# uses; numpy is pinned to the 2.x line LedFX 2.1.x expects. ledfx itself pulls
-# in the rest (aiohttp, aubio, sounddevice, voluptuous, ...).
+# The LedFX engine, pinned to an upstream commit *past* the 2.1.9 release to pick
+# up post-release fixes that matter here - most importantly the Sendspin watchdog
+# no longer forcing a reconnect while the stream is idle (the old "no audio for
+# 20s -> reconnect" churn), plus Sendspin now-playing metadata. Pinned to a SHA
+# for reproducibility; bump it to move forward. ledfx resolves the rest of its
+# deps (numpy, aiosendspin, pyflac, python-mbedtls, ...) with its own pins.
+#
+# Upstream still self-reports version 2.1.9 on this commit; confirm the build via
+# /api/info github_sha (90bebef8...), not the version string.
 pkgconfig>=1.5.5
 setuptools>=69.0.3
 wheel>=0.42.0
-numpy>=2.0.0,<3.0.0
-python-mbedtls~=2.9.0
-ledfx~=2.1.9
+ledfx @ git+https://github.com/LedFx/LedFx.git@90bebef841fc69e6c09220918b8853543a09756b

@@ -4,7 +4,10 @@
 
 First release — a clean, HA-native fork of the community LedFX add-on.
 
-- **Ships LedFX 2.1.9** (the official engine) with the ingress-ready official web UI.
+- **Ships the LedFX engine pinned just past 2.1.9** (upstream commit `90bebef8`)
+  with the ingress-ready official web UI. The post-release pin brings the
+  **Sendspin watchdog fix** (no more idle "no audio → reconnect" churn) and
+  **Sendspin now-playing metadata**.
 - **Ingress fixed.** The web UI now works through Home Assistant ingress (sidebar
   and Nabu Casa), not just on `localhost`. The frontend was patched to talk to its
   own origin instead of a hard-coded `localhost:8888`, and a stale cached host is

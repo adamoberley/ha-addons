@@ -5,7 +5,10 @@
 First release of a third add-on in this repository: **LedFX**, the real-time,
 audio-reactive LED controller, running natively on Home Assistant OS.
 
-- Ships the official **LedFX 2.1.9** engine with the ingress-ready LedFX web UI.
+- Ships the **LedFX engine pinned just past 2.1.9** (upstream commit `90bebef8`)
+  with the ingress-ready LedFX web UI — the post-release pin brings the **Sendspin
+  watchdog fix** (no more idle "no audio → reconnect" churn) and **Sendspin
+  now-playing metadata**.
 - **Ingress fixed** — the UI works through Home Assistant ingress (sidebar +
   Nabu Casa), not just on `localhost`. The frontend was patched to use its own
   origin instead of a hard-coded `localhost:8888`, with a stale-host auto-clear.

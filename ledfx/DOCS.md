@@ -20,9 +20,12 @@ that made it frustrating on Home Assistant:
 | Experimental "Blade" branding + devil-emoji icon | Clean LedFX packaging |
 | Audio needed a sound card / VBAN from a PC | **Sendspin** from Music Assistant — no hardware, no second box |
 
-The LedFX **engine** is the official `ledfx` 2.1.9 release. The **web UI** is the
-official LedFX frontend (the HASS-optimised build, which uses relative paths so it
-works under ingress); we patch only how it discovers its backend.
+The LedFX **engine** is upstream LedFX pinned just *past* the 2.1.9 release, to
+pick up post-release fixes that matter here — most importantly the **Sendspin
+watchdog** no longer forcing a reconnect while a stream is idle (the old "no audio
+for 20s → reconnect" churn), plus **Sendspin now-playing metadata**. The **web UI**
+is the official LedFX frontend (the HASS-optimised build, which uses relative paths
+so it works under ingress); we patch only how it discovers its backend.
 
 ## Requirements
 
@@ -96,8 +99,8 @@ LedFX. You enter the MQTT credentials there yourself.
   `localhost` one automatically, but a forced refresh helps). If it persists, use
   the direct `http://<ha-ip>:8888` URL and confirm there.
 - **Lights don't react** — make sure something is *playing* in Music Assistant and
-  the **Sendspin** device is the active audio input. The Sendspin watchdog logs
-  "no audio received" while playback is idle — that's normal.
+  the **Sendspin** device is the active audio input. (This build's watchdog stays
+  quiet while playback is idle and only reconnects on a genuinely stalled stream.)
 - **WLED not found** — add it by IP in **Devices**; confirm the strip is reachable
   from HA.
 - **Sendspin server not discovered** — add it manually:
