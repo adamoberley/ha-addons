@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.2 — 2026-06-25
+
+- **Fix the ingress reload loop** introduced in 1.1.1. Clearing the saved host on
+  every load fought LedFX's own "host unusable → set host + reload" recovery, so
+  each reload wiped it again → an infinite flash. Now the add-on *sets*
+  `ledfx-host` (and the Known-Hosts list) to the current origin on every load, so
+  it's always present and correct (handles the rotating ingress token) and that
+  recovery effect never fires. (LAN access unaffected.)
+
 ## 1.1.1 — 2026-06-25
 
 - **Fix ingress host flapping / "404, no core" after a while.** The frontend

@@ -103,18 +103,19 @@ def patch_index() -> None:
 
     html = html.replace("LedFx Client - by Blade", "LedFX for Home Assistant")
 
-    # The frontend's API base is `localStorage['ledfx-host'] || <live origin>`.
-    # The HA ingress token rotates each session, so any saved host (a stale
-    # token URL, the bare nabu.casa origin, localhost, the LAN IP) goes 404. Clear
-    # the saved host + the Known-Hosts list every load so it always falls back to
-    # the live origin. Also drop a localhost value cached in the main store.
+    # The frontend's API base is `localStorage['ledfx-host'] || <live origin>`,
+    # and the HA ingress token rotates each session. REMOVING the saved host on
+    # every load fought the app's own "host unusable -> set ledfx-host + reload"
+    # recovery effect and caused an infinite reload loop. Instead, SET the saved
+    # host (and the single-entry Known-Hosts list) to the current origin on every
+    # load: always present and correct (handles token rotation), so that recovery
+    # effect never fires. Trailing slash is stripped so the WS URL
+    # (host + "/api/websocket") doesn't get a double slash.
     cleaner = (
         "<script>try{"
-        "localStorage.removeItem('ledfx-host');"
-        "localStorage.removeItem('ledfx-hosts');"
-        "var v=localStorage.getItem('ledfx-frontend');"
-        "if(v&&(v.indexOf('localhost')>-1||v.indexOf('127.0.0.1')>-1))"
-        "localStorage.removeItem('ledfx-frontend');"
+        "var b=window.location.href.split('#')[0].replace(/\\/+$/,'');"
+        "localStorage.setItem('ledfx-host',b);"
+        "localStorage.setItem('ledfx-hosts',JSON.stringify([b]));"
         "}catch(e){}</script>"
     )
     if cleaner not in html:
