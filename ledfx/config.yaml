@@ -10,7 +10,7 @@
 # localhost), the engine binds the LAN so direct access works too, and the
 # packaging is de-branded.
 name: LedFX
-version: "1.1.0"
+version: "1.1.1"
 slug: ledfx
 description: >-
   Native LedFX for Home Assistant - real-time, audio-reactive lighting for WLED
@@ -56,7 +56,13 @@ services:
 
 options:
   log_level: info
+  sendspin_delay_ms: 0
 
 schema:
   # ledfx log verbosity. 'debug' is very loud - use it only when troubleshooting.
   log_level: list(debug|info|warning|error)
+  # Audio delay (ms) applied to the Sendspin input, to line the lights up with
+  # your speakers. Set it here instead of in the LedFX UI: the UI's delay control
+  # is buggy for Sendspin (it resets the audio source), so the add-on applies
+  # this value on start and keeps the Sendspin device selected. Restart to apply.
+  sendspin_delay_ms: int(0,5000)

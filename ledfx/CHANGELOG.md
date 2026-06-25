@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.1.1 — 2026-06-25
+
+- **Fix ingress host flapping / "404, no core" after a while.** The frontend
+  keeps the backend URL in `localStorage`, but the HA ingress token rotates each
+  session, so a saved host (a stale token URL, the bare Nabu Casa origin,
+  `localhost`, the LAN IP) goes 404. The add-on now clears the saved host +
+  Known-Hosts list on every load, so the UI always talks to the **live origin**.
+- **Sendspin audio delay option.** New `sendspin_delay_ms` add-on option. LedFX's
+  in-UI delay control is buggy for Sendspin (it silently resets the audio source),
+  so set the delay here instead — the add-on applies it on start and keeps the
+  Sendspin device selected. (0–5000 ms; restart to apply.)
+
 ## 1.1.0 — 2026-06-25
 
 A polish release: zero-config Home Assistant control, no onboarding friction, and

@@ -33,6 +33,19 @@ except Exception:
 # Auto-scan for WLED on boot (default on; respect a later user change).
 cfg.setdefault("scan_on_startup", True)
 
+# Apply the Sendspin audio delay from the add-on options. The LedFX UI's delay
+# control is buggy for Sendspin (it resets the audio source), so we set it here
+# and leave whatever audio device is already selected untouched.
+try:
+    opts = json.load(open("/data/options.json"))
+except Exception:
+    opts = {}
+try:
+    delay_ms = int(opts.get("sendspin_delay_ms", 0) or 0)
+except (TypeError, ValueError):
+    delay_ms = 0
+cfg.setdefault("audio", {})["delay_ms"] = delay_ms
+
 # Look up the MQTT broker from the Supervisor.
 host = user = pw = ""
 port, use_ssl = 1883, False

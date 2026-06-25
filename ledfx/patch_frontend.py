@@ -103,11 +103,19 @@ def patch_index() -> None:
 
     html = html.replace("LedFx Client - by Blade", "LedFX for Home Assistant")
 
+    # The frontend's API base is `localStorage['ledfx-host'] || <live origin>`.
+    # The HA ingress token rotates each session, so any saved host (a stale
+    # token URL, the bare nabu.casa origin, localhost, the LAN IP) goes 404. Clear
+    # the saved host + the Known-Hosts list every load so it always falls back to
+    # the live origin. Also drop a localhost value cached in the main store.
     cleaner = (
-        "<script>try{['ledfx-host','ledfx-frontend'].forEach(function(k){"
-        "var v=localStorage.getItem(k);"
+        "<script>try{"
+        "localStorage.removeItem('ledfx-host');"
+        "localStorage.removeItem('ledfx-hosts');"
+        "var v=localStorage.getItem('ledfx-frontend');"
         "if(v&&(v.indexOf('localhost')>-1||v.indexOf('127.0.0.1')>-1))"
-        "localStorage.removeItem(k);});}catch(e){}</script>"
+        "localStorage.removeItem('ledfx-frontend');"
+        "}catch(e){}</script>"
     )
     if cleaner not in html:
         html = html.replace("<head>", "<head>" + cleaner, 1)
