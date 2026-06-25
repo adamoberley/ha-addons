@@ -23,12 +23,12 @@ instead of bolting on a cloud account or a second machine.
 All three live in this single repository. Add it once, then install whichever you
 want:
 
-1. **Settings → Add-ons → Add-on Store → ⋮ (top-right) → Repositories**:
+1. **Settings → Aapps (Add-ons) → App (Add-on) Store → ⋮ (top-right) → Repositories**:
 
    [![Add repository to your Home Assistant.](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fadamoberley%2Fha-addons)
 
    …or paste `https://github.com/adamoberley/ha-addons`.
-2. They appear in the store under **Adam Oberley's Home Assistant Add-ons**.
+2. They appear in the store under **Adam Oberley's Home Assistant Apps (Add-ons)**.
    Install one, **Start** it, and open its sidebar panel.
 
 Each add-on has its own setup guide (linked per section below). Most need little or
