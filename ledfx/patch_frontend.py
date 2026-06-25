@@ -17,12 +17,16 @@ behind the HA ingress proxy *and* on the LAN:
    gives the relative asset paths ingress needs — but it also sets the React
    Router to ``basename:"."``, which the router normalises to ``"/."``. No real
    URL starts with ``/.``, so the router "won't render anything" → a blank page
-   (confirmed via the browser console). We replace it with the *actual mount
-   path* (``new URL(document.baseURI).pathname``): ``/`` on the LAN, and
-   ``/api/hassio_ingress/<token>/`` under ingress — so the router matches and
-   renders in both.
+   (confirmed via the browser console). HA ingress serves the app so the router's
+   in-app location is ``/`` (and on the LAN it's also ``/``), so we set the
+   basename to a plain ``/`` — which matches in both cases. (A dynamic
+   ``document.baseURI`` basename does NOT work: under ingress baseURI is the full
+   ``/api/hassio_ingress/<token>/`` path, but the router's location is just ``/``,
+   so they don't match.)
 
-We also de-brand the page title and clear any stale cached ``localhost`` host.
+We also de-brand the page title and clear any stale cached ``localhost`` host
+(left in localStorage by the old add-on at the same Nabu Casa origin), so the
+frontend falls back to our same-origin default instead of ``localhost:8888``.
 Idempotent: safe to run more than once.
 """
 from __future__ import annotations
@@ -39,10 +43,11 @@ ROOT = os.path.dirname(ledfx_frontend.__file__)
 ORIGIN_EXPR = '(window.location.href.split("#")[0])'
 HOST_FALLBACKS = ('"http://localhost:8888"', '"https://ledfx.local:8889"')
 
-# React Router basename: "." normalises to "/." and matches nothing. Use the
-# real mount path so it works at the LAN root and under the ingress sub-path.
+# React Router basename: "." normalises to "/." and matches nothing -> blank page.
+# Under HA ingress the in-app router location is "/" (not the ingress path), and
+# on the LAN it's "/" too, so a plain "/" basename matches in both cases.
 BASENAME_BUG = 'basename:"."'
-BASENAME_FIX = "basename:new URL(document.baseURI).pathname"
+BASENAME_FIX = 'basename:"/"'
 
 
 def patch_js() -> None:
@@ -82,8 +87,10 @@ def patch_index() -> None:
     html = html.replace("LedFx Client - by Blade", "LedFX for Home Assistant")
 
     cleaner = (
-        "<script>try{var k='ledfx-frontend',v=localStorage.getItem(k);"
-        "if(v&&v.indexOf('localhost:8888')>-1)localStorage.removeItem(k);}catch(e){}</script>"
+        "<script>try{['ledfx-host','ledfx-frontend'].forEach(function(k){"
+        "var v=localStorage.getItem(k);"
+        "if(v&&(v.indexOf('localhost')>-1||v.indexOf('127.0.0.1')>-1))"
+        "localStorage.removeItem(k);});}catch(e){}</script>"
     )
     if cleaner not in html:
         html = html.replace("<head>", "<head>" + cleaner, 1)

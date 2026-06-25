@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.3 — 2026-06-25
+
+- **Fix the UI under Home Assistant ingress** (the LAN URL worked, but the
+  sidebar / Nabu Casa stayed blank). Two ingress-specific issues:
+  - **Router basename** is now `"/"`. Under ingress the router's in-app location
+    is `/`, so the previous dynamic mount-path basename (the full
+    `/api/hassio_ingress/<token>/`) didn't match and rendered nothing.
+  - **Stale backend host** — clear a `localhost:8888` host left in `localStorage`
+    (`ledfx-host` / `ledfx-frontend`) by the old add-on at the same Nabu Casa
+    origin, so the UI talks to its own origin instead of issuing blocked
+    mixed-content `ws://localhost:8888` / `http://localhost:8888` calls.
+
 ## 1.0.2 — 2026-06-25
 
 - **Fix the blank/black web UI.** The HASS frontend build set the React Router
