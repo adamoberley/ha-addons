@@ -335,6 +335,18 @@ def patch_index() -> None:
         ".MuiInputBase-input.Mui-disabled,.MuiInputBase-input:disabled{"
         "-webkit-text-fill-color:var(--ha-text-secondary,#9b9b9b)!important;"
         "color:var(--ha-text-secondary,#9b9b9b)!important}"
+        # Mobile: the left nav uses a *persistent* drawer that reserves its 240px
+        # in the flex row, with the content box carrying a matching margin-left:
+        # -240px to sit under it. On a phone that pushes the content half off
+        # screen when the drawer opens. Below 600px, drop the drawer's reserved
+        # width AND reset that coupled negative margin so content is full-width;
+        # the (position:fixed) paper then overlays content like a temporary drawer.
+        "@media (max-width:600px){"
+        ".MuiDrawer-docked{width:0!important}"
+        ".MuiDrawer-docked + .MuiBox-root{margin-left:0!important}"
+        ".MuiDrawer-docked .MuiDrawer-paper{"
+        "box-shadow:0 0 24px rgba(0,0,0,0.7)!important}"
+        "}"
         "</style>"
     )
     # Declutter the Home dashboard: hide the two 8-gauge stat rows (.hideTablet)
@@ -348,6 +360,18 @@ def patch_index() -> None:
         '.Content .MuiStack-root:has(> .MuiFab-root[aria-label="github"]){display:none!important}'
         "</style>"
     )
+    # Land on the device list instead of the near-empty Home page. The app uses
+    # hash routing (Home = "#/", Devices = "#/Devices"); redirect the empty/home
+    # hash to Devices on load and whenever it's navigated to. Runs in <head>
+    # before the bundle boots, so the router initialises straight on Devices (no
+    # flash). location.replace keeps it out of history (no back-button trap).
+    # Deep links (#/Settings, #/device/..., etc.) are untouched.
+    redirect = (
+        "<script>(function(){function g(){var h=location.hash;"
+        "if(h===''||h==='#'||h==='#/'){"
+        "location.replace(location.href.split('#')[0]+'#/Devices');}}"
+        "window.addEventListener('hashchange',g);g();})();</script>"
+    )
 
     if cleaner not in html:
         html = html.replace("<head>", "<head>" + cleaner, 1)
@@ -355,6 +379,8 @@ def patch_index() -> None:
         html = html.replace("<head>", "<head>" + themer, 1)
     if bridge not in html:
         html = html.replace("<head>", "<head>" + bridge, 1)
+    if redirect not in html:
+        html = html.replace("<head>", "<head>" + redirect, 1)
     if header_css not in html:
         html = html.replace("<head>", "<head>" + header_css, 1)
     if declutter not in html:
@@ -364,7 +390,7 @@ def patch_index() -> None:
         with open(index, "w", encoding="utf-8") as handle:
             handle.write(html)
         print("[patch] index.html: de-branded title + stale-host cleaner + "
-              "HA-theme follower + HA var bridge + flat header + "
+              "HA-theme follower + HA var bridge + home->devices + flat header + "
               "declutter style injected")
 
 

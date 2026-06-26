@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.7.0 — 2026-06-25
+
+- **Much better on a phone.** The left navigation used a *persistent* drawer that
+  reserved 240px and shoved the page half off-screen on a narrow display. Below
+  600px it now behaves like a proper slide-over: the content stays full-width and
+  the drawer floats on top (with a shadow) when you open it. (Popups/dialogs were
+  already responsive — verified the Add-Device form and menus fit and scroll on a
+  phone-width screen.)
+- **Home now opens on your devices.** The landing page was a near-empty
+  placeholder (a search bar + a row of setup/utility buttons). It now goes
+  straight to the device list — the page you actually use. Deep links to Settings,
+  Scenes, and individual devices are unchanged.
+- Note: the old Home utility buttons (re-run intro/tour, scan, reset) are no
+  longer on the landing page; their functions live in the ⋮ menu / Settings / the
+  **+** button. (Relocating them into Settings itself needs a frontend source
+  build — see the repo notes.)
+
 ## 1.6.0 — 2026-06-25
 
 - **Cleaner page header** — removed the little pixel QR-connect icon that sat
