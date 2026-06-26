@@ -312,6 +312,18 @@ def patch_index() -> None:
         ".MuiAppBar-root .MuiToolbar-root .MuiIconButton-root,"
         ".MuiAppBar-root .MuiToolbar-root .MuiSvgIcon-root{"
         "color:var(--ha-header-fg,#e1e1e1)!important}"
+        # Left-nav drawer header: same flat HA surface as the app bar, not a
+        # solid blue block. jss* classes are build-unstable, so target the header
+        # structurally (first Box child of the drawer paper) and null any blue
+        # child backgrounds (e.g. the de-Blade'd "BLADE MOD" badge box). The
+        # white FX logo stays visible on the dark surface.
+        ".MuiDrawer-paper>.MuiBox-root:first-child{"
+        "background-color:var(--ha-header-bg,#1c1c1c)!important;"
+        "color:var(--ha-header-fg,#e1e1e1)!important;"
+        "border-bottom:var(--ha-header-border,1px solid rgba(255,255,255,0.12))"
+        "!important}"
+        ".MuiDrawer-paper>.MuiBox-root:first-child *{"
+        "background-color:transparent!important}"
         "</style>"
     )
     # Declutter the Home dashboard: hide the two 8-gauge stat rows (.hideTablet)

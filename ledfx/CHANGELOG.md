@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.5.0 — 2026-06-25
+
+- **The slide-out menu header now matches too.** Opening the left navigation
+  drawer revealed a leftover solid-blue block (with a stray blue badge box from
+  the old "BLADE MOD" badge). It's now the same flat Home Assistant surface as
+  the top bar — the white LedFX logo stays, the blue badge is gone — driven by
+  the same live HA theme variables, so the whole chrome is consistent. Verified
+  in-browser on the running instance.
+
 ## 1.4.0 — 2026-06-25
 
 - **The top bar now looks like the Home Assistant header**, not a big solid blue
