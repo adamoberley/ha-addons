@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.4.0 — 2026-06-25
+
+- **The top bar now looks like the Home Assistant header**, not a big solid blue
+  bar. LedFX painted its app bar with the theme's primary color; HA's modern
+  header (2026.2+) is flat and blends with the surface. The bar is now HA's
+  surface color with HA's header text/icon color, no drop shadow, and a 1px
+  bottom divider at HA's 56px height. It reads HA's *live* header variables from
+  the ingress parent, so it tracks your actual HA theme (including a custom one)
+  and updates if you switch HA light/dark — falling back to the dark HA look on
+  direct LAN access.
+- **Fonts match HA (Roboto).** LedFX shipped Roboto but only under per-weight
+  names, so its Nunito-first UI fell back to a system font. The app now defines a
+  real Roboto family (400/500/700/900) from the bundled files and uses HA's
+  `Roboto, Noto, …` stack, so the type matches Home Assistant.
+
 ## 1.3.0 — 2026-06-25
 
 - **The UI now follows your Home Assistant theme.** LedFX's blue themes were

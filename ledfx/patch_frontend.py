@@ -21,6 +21,11 @@ Fixes:
 5. Match Home Assistant's theme - retune LedFX's DarkBlue/LightBlue themes to
    HA's exact dark/light palette and inject a script that mirrors HA's light/dark
    mode (read from the same-origin ingress parent) onto them.
+6. Match HA's font - define a real "Roboto" family from the bundled TTFs and
+   switch the app's Nunito font stacks to Roboto (HA uses Roboto).
+7. Flat header - reskin the MUI AppBar to look like HA's header (surface color,
+   no shadow, 1px divider, 56px) instead of a solid blue bar. Driven by HA's live
+   theme vars, bridged from the ingress parent onto our :root as --ha-*.
 
 We also de-brand the page title and set the backend host + theme in localStorage
 on every load (see patch_index). Idempotent.
@@ -85,6 +90,36 @@ THEME_EDITS = (
     ),
 )
 
+# (6) Match HA's font. HA's UI is Roboto; LedFX is Nunito. The bundle ships
+# Roboto TTFs but only under per-weight family names (Roboto-Regular/Bold/Black),
+# so MUI's request for plain "Roboto" falls back to a system sans. Define a real
+# "Roboto" family from those TTFs (appended to fonts.css, which already loads
+# ./fonts/* successfully) and switch the app's font stacks to lead with Roboto.
+# The browser maps intermediate weights (300/500) to the nearest defined face.
+# HA's stack is "Roboto, Noto, sans-serif"; Noto/Helvetica/Arial are graceful
+# no-ops if absent and cover non-Latin glyphs. The bundled Roboto faces win.
+FONT_JS = (
+    'fontFamily:\'"Nunito", "Roboto", "Helvetica", "Arial", sans-serif\'',
+    'fontFamily:\'"Roboto", "Noto", "Helvetica", "Arial", sans-serif\'',
+)
+FONT_CSS = (
+    "font-family:Nunito,Roboto,Helvetica,sans-serif",
+    "font-family:Roboto,Noto,Helvetica,Arial,sans-serif",
+)
+# 500 (medium) has no bundled file -> map to Regular so HA's medium-weight text
+# (h2, buttons, sub-headers) isn't faux-bolded up to the 700 Bold face.
+ROBOTO_FACE = (
+    "\n/* HA-match: a real Roboto family from the bundled per-weight TTFs */\n"
+    "@font-face{font-family:'Roboto';font-style:normal;font-weight:400;"
+    "src:url('./fonts/Roboto-Regular.ttf') format('truetype')}\n"
+    "@font-face{font-family:'Roboto';font-style:normal;font-weight:500;"
+    "src:url('./fonts/Roboto-Regular.ttf') format('truetype')}\n"
+    "@font-face{font-family:'Roboto';font-style:normal;font-weight:700;"
+    "src:url('./fonts/Roboto-Bold.ttf') format('truetype')}\n"
+    "@font-face{font-family:'Roboto';font-style:normal;font-weight:900;"
+    "src:url('./fonts/Roboto-Black.ttf') format('truetype')}\n"
+)
+
 
 def _replace(src: str, old: str, new: str, label: str, expect=None) -> tuple[str, int]:
     n = src.count(old)
@@ -114,13 +149,15 @@ def patch_js() -> None:
             src, n = _replace(src, old, new, f"theme {old[:28]!r}")
             theme_totals[old] += n
             theme_hits += n
+        src, font_hits = _replace(src, FONT_JS[0], FONT_JS[1], "font (js)")
 
         if src != original:
             with open(path, "w", encoding="utf-8") as handle:
                 handle.write(src)
             name = os.path.basename(path)
             print(f"[patch] {name}: host={host_hits} basename={base_hits} "
-                  f"intro={intro_hits} blade-text={blade_hits} theme={theme_hits}")
+                  f"intro={intro_hits} blade-text={blade_hits} "
+                  f"theme={theme_hits} font={font_hits}")
 
     # Each theme anchor should match exactly once across the whole bundle.
     for old, total in theme_totals.items():
@@ -138,6 +175,34 @@ def patch_assets() -> None:
         print(f"[patch] blanked Blade badge asset: {os.path.basename(path)}")
     if not found:
         print("[patch] note: no blademod*.svg found (sidebar badge may have moved)")
+
+
+def patch_styles() -> None:
+    """Point the app's base CSS font stack at Roboto and define the family."""
+    css_hits = 0
+    for path in glob.glob(os.path.join(ROOT, "static", "css", "*.css")):
+        with open(path, encoding="utf-8") as handle:
+            src = original = handle.read()
+        src, n = _replace(src, FONT_CSS[0], FONT_CSS[1], "font (css)")
+        css_hits += n
+        if src != original:
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(src)
+            print(f"[patch] {os.path.basename(path)}: font={n}")
+    if css_hits != 1:
+        print(f"[patch] WARNING: css font anchor matched {css_hits}x (expected 1)")
+
+    # Define a real "Roboto" family from the bundled TTFs (idempotent append).
+    fonts_css = os.path.join(ROOT, "fonts.css")
+    if os.path.exists(fonts_css):
+        with open(fonts_css, encoding="utf-8") as handle:
+            css = handle.read()
+        if "font-family:'Roboto';font-style:normal;font-weight:400" not in css:
+            with open(fonts_css, "a", encoding="utf-8") as handle:
+                handle.write(ROBOTO_FACE)
+            print("[patch] fonts.css: appended Roboto family (400/500/700/900)")
+    else:
+        print("[patch] note: fonts.css not found (Roboto family not defined)")
 
 
 def patch_index() -> None:
@@ -191,6 +256,64 @@ def patch_index() -> None:
         "if(!cur||(!!D[cur])!==H)localStorage.setItem('ledfx-theme',w);}"
         "}catch(e){}</script>"
     )
+    # Bridge HA's live theme vars onto our :root as --ha-*. Same-origin under
+    # ingress lets us read the parent's computed custom properties; we resolve
+    # each through HA's fallback chain, else a dark/light literal (defaulting to
+    # dark, matching the LAN theme default). A MutationObserver re-runs it when HA
+    # swaps theme (HA mutates style/class on its <html>). The header CSS below
+    # consumes these. dark is inferred from the header/surface bg luminance.
+    bridge = (
+        "<script>(function(){function ro(){var P=null;try{"
+        "if(window.parent&&window.parent!==window)"
+        "P=getComputedStyle(window.parent.document.documentElement);}catch(e){}"
+        "var d=document.documentElement,dark=true,"
+        "bg=P&&(P.getPropertyValue('--app-header-background-color')||"
+        "P.getPropertyValue('--sidebar-background-color')||"
+        "P.getPropertyValue('--card-background-color')||'').trim(),"
+        "m=bg&&bg.match(/^#?([0-9a-f]{6})$/i);"
+        "if(m){var r=parseInt(m[1].slice(0,2),16),g=parseInt(m[1].slice(2,4),16),"
+        "b=parseInt(m[1].slice(4,6),16);dark=(299*r+587*g+114*b)/1000<128;}"
+        "function set(n,vs,ll,ld){var v='';if(P){for(var i=0;i<vs.length&&!v;i++)"
+        "v=(P.getPropertyValue(vs[i])||'').trim();}"
+        "d.style.setProperty(n,v||(dark?ld:ll));}"
+        "set('--ha-header-bg',['--app-header-background-color',"
+        "'--sidebar-background-color','--card-background-color'],"
+        "'#ffffff','#1c1c1c');"
+        "set('--ha-header-fg',['--app-header-text-color','--sidebar-text-color',"
+        "'--primary-text-color'],'#212121','#e1e1e1');"
+        "set('--ha-header-border',['--app-header-border-bottom'],"
+        "'1px solid rgba(0,0,0,0.12)','1px solid rgba(255,255,255,0.12)');"
+        "set('--ha-header-height',['--header-height'],'56px','56px');}"
+        "ro();try{if(window.parent&&window.parent!==window)"
+        "new MutationObserver(ro).observe("
+        "window.parent.document.documentElement,"
+        "{attributes:true,attributeFilter:['style','class']});}catch(e){}"
+        "})();</script>"
+    )
+    # Reskin the MUI AppBar as HA's flat header instead of a solid primary-color
+    # bar: surface background (not blue), no shadow at rest, a 1px bottom divider,
+    # HA's 56px height, and header-fg text/icons. background-image:none kills MUI
+    # v7's dark elevation overlay. Stable global Mui* classes + !important win
+    # over emotion's runtime styles regardless of injection order.
+    header_css = (
+        "<style>"
+        ".MuiAppBar-root,.MuiAppBar-root.MuiAppBar-colorPrimary,"
+        ".MuiAppBar-colorPrimary{"
+        "background-color:var(--ha-header-bg,#1c1c1c)!important;"
+        "background-image:none!important;"
+        "color:var(--ha-header-fg,#e1e1e1)!important;"
+        "box-shadow:none!important;"
+        "border-bottom:var(--ha-header-border,1px solid rgba(255,255,255,0.12))"
+        "!important}"
+        ".MuiAppBar-root .MuiToolbar-root{"
+        "color:var(--ha-header-fg,#e1e1e1)!important;"
+        "min-height:var(--ha-header-height,56px)!important}"
+        ".MuiAppBar-root .MuiToolbar-root .MuiTypography-root,"
+        ".MuiAppBar-root .MuiToolbar-root .MuiIconButton-root,"
+        ".MuiAppBar-root .MuiToolbar-root .MuiSvgIcon-root{"
+        "color:var(--ha-header-fg,#e1e1e1)!important}"
+        "</style>"
+    )
     # Declutter the Home dashboard: hide the two 8-gauge stat rows (.hideTablet)
     # and the external-links FAB row (GitHub/Docs/Discord, anchored on the github
     # Fab). Verified live against the running build. We only hide whole sections by
@@ -207,6 +330,10 @@ def patch_index() -> None:
         html = html.replace("<head>", "<head>" + cleaner, 1)
     if themer not in html:
         html = html.replace("<head>", "<head>" + themer, 1)
+    if bridge not in html:
+        html = html.replace("<head>", "<head>" + bridge, 1)
+    if header_css not in html:
+        html = html.replace("<head>", "<head>" + header_css, 1)
     if declutter not in html:
         html = html.replace("<head>", "<head>" + declutter, 1)
 
@@ -214,10 +341,12 @@ def patch_index() -> None:
         with open(index, "w", encoding="utf-8") as handle:
             handle.write(html)
         print("[patch] index.html: de-branded title + stale-host cleaner + "
-              "HA-theme follower + declutter style injected")
+              "HA-theme follower + HA var bridge + flat header + "
+              "declutter style injected")
 
 
 if __name__ == "__main__":
     patch_js()
     patch_assets()
+    patch_styles()
     patch_index()
