@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.7.1 — 2026-06-25
+
+- **Tidied the bottom nav.** Now that Home opens on your devices, the separate
+  "Home" tab was redundant — the bottom bar is now **Devices / Scenes /
+  Settings**, opening on Devices.
+
 ## 1.7.0 — 2026-06-25
 
 - **Much better on a phone.** The left navigation used a *persistent* drawer that

@@ -347,6 +347,11 @@ def patch_index() -> None:
         ".MuiDrawer-docked .MuiDrawer-paper{"
         "box-shadow:0 0 24px rgba(0,0,0,0.7)!important}"
         "}"
+        # Home now lands on Devices (see the redirect script), so the bottom-nav
+        # "Home" tab is redundant -> hide it, leaving Devices/Scenes/Settings. It's
+        # the first action (stable order: Home, Devices, Scenes, Settings).
+        ".MuiBottomNavigation-root>.MuiBottomNavigationAction-root:first-child{"
+        "display:none!important}"
         "</style>"
     )
     # Declutter the Home dashboard: hide the two 8-gauge stat rows (.hideTablet)
