@@ -2,15 +2,17 @@
 #
 # A long-running service that pulls curated public-domain art from reframed.gallery
 # (or the Art Institute of Chicago), fits it to your Frame TV's panel, and pushes
-# it to Art Mode - replacing the previous upload in place (the art library never
-# piles up) and never repeating recent pieces. Switches daily (or on your own
-# interval); no automation needed.
+# it to Art Mode - keeping a bounded art library (1 = replace in place, or keep the
+# last N days to browse back through) and never repeating recent pieces. Switches
+# daily (or on your own interval); no automation needed. Paste a reframed.gallery
+# link into the panel to show one specific piece now.
 name: REFRAMED Gallery
-version: "0.5.0"
+version: "0.6.0"
 slug: frame_gallery
 description: >-
   Curated public-domain art on your Samsung Frame TV from reframed.gallery -
-  daily, cropped to fill, never repeating, replaced in place. No automation needed.
+  daily, cropped to fill, never repeating. Show any piece by link; keep past days
+  on the TV. No automation needed.
 url: https://github.com/adamoberley/ha-addons/tree/main/frame_gallery
 
 # No Chromium here (we fetch finished images, not render), so all common
@@ -63,6 +65,7 @@ options:
   mat_color: "#141414"
   tv_matte: "none"
   active_hours: ""
+  library_size: 1
   avoid_repeat_count: 2000
   enable_mqtt: true
   mqtt_host: ""
@@ -116,6 +119,10 @@ schema:
   tv_matte: "str?"
   # Blank = run 24/7, or a local-time window like "07:00-23:00".
   active_hours: "str?"
+  # How many of our uploads stay in the TV's art library. 1 = replace in place
+  # (the classic behaviour); higher keeps the last N days of art on the TV so you
+  # can flick back through them with the remote. Only our own uploads are deleted.
+  library_size: "int(1,50)"
   # Don't repeat the last N pieces (0 = allow repeats).
   avoid_repeat_count: "int(0,5000)"
   # Expose HA entities (Current Art sensor, Next button, Collection select) over MQTT

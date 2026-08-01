@@ -27,6 +27,7 @@ class Options:
     mat_color: str
     tv_matte: str
     active_hours: str
+    library_size: int
     avoid_repeat_count: int
     enable_mqtt: bool
     mqtt_host: str
@@ -78,6 +79,7 @@ def load() -> Options:
         mat_color=str(raw.get("mat_color", "#141414")).strip() or "#141414",
         tv_matte=str(raw.get("tv_matte", "none")).strip() or "none",
         active_hours=str(raw.get("active_hours", "")).strip(),
+        library_size=max(1, int(raw.get("library_size", 1))),
         avoid_repeat_count=int(raw.get("avoid_repeat_count", 2000)),
         enable_mqtt=bool(raw.get("enable_mqtt", True)),
         mqtt_host=str(raw.get("mqtt_host", "")).strip(),

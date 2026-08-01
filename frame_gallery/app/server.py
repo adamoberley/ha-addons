@@ -4,9 +4,11 @@ Bound to 0.0.0.0 for ingress (HA authenticates it). URLs are relative so they
 work under the ingress token path.
   - `trigger` is set by "Show next" to request a fresh pick.
   - `repush` is set by "Re-push to TV" to re-send the current image.
+  - `on_url` validates+queues a pasted reframed.gallery link ("Show this").
   - `status` is a dict the loop updates and the panel reads.
 
-Endpoints: GET / (panel), /status (JSON), /preview.jpg, /healthz; POST /next, /repush.
+Endpoints: GET / (panel), /status (JSON), /preview.jpg, /healthz;
+POST /next, /repush, /show.
 """
 from __future__ import annotations
 
@@ -14,7 +16,7 @@ import json
 import logging
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 log = logging.getLogger("frame-gallery.server")
 
@@ -84,6 +86,16 @@ CONTROL_HTML = b"""<!doctype html><html><head><meta charset="utf-8">
   button.ghost { background:var(--chip); color:var(--text); }
   button:hover { filter:brightness(1.06); }
   button:disabled { opacity:.5; cursor:default; filter:none; }
+  .link { margin-top:18px; padding-top:16px; border-top:1px solid var(--divider); }
+  .link label { display:block; font-size:.86rem; font-weight:500; margin-bottom:2px; }
+  .link .hint { color:var(--secondary); font-size:.78rem; margin-bottom:9px; }
+  .linkrow { display:flex; gap:10px; flex-wrap:wrap; }
+  .linkrow input { flex:1 1 260px; min-width:0; font:inherit; font-size:.92rem;
+                   padding:10px 12px; border-radius:9px; color:var(--text);
+                   background:var(--bg); border:1px solid var(--divider); }
+  .linkrow input:focus { outline:2px solid var(--primary); outline-offset:-1px; }
+  .msg { font-size:.8rem; margin-top:8px; min-height:1.1em; color:var(--secondary); }
+  .msg.bad { color:var(--err); }
 </style></head><body>
 <div class="card">
   <div class="accent" id="accent"></div>
@@ -105,6 +117,17 @@ CONTROL_HTML = b"""<!doctype html><html><head><meta charset="utf-8">
     <div class="actions">
       <button class="primary" id="go">Show next</button>
       <button class="ghost" id="repush">Re-push to TV</button>
+    </div>
+    <div class="link">
+      <label for="url">Show a specific piece</label>
+      <div class="hint">Paste a reframed.gallery artwork link &mdash; it goes up now,
+        whatever the collection says.</div>
+      <form class="linkrow" id="linkform">
+        <input id="url" name="url" type="text" autocomplete="off" spellcheck="false"
+               placeholder="https://www.reframed.gallery/artist/artwork">
+        <button class="ghost" id="show" type="submit">Show this</button>
+      </form>
+      <div class="msg" id="msg"></div>
     </div>
   </div>
 </div>
@@ -186,8 +209,10 @@ CONTROL_HTML = b"""<!doctype html><html><head><meta charset="utf-8">
     document.getElementById('changed').textContent = 'changed '+rel(s.last_ts);
 
     var chips='';
+    if(s.link) chips += '<span class="chip">Your link</span>';
     if(s.collection) chips += '<span class="chip">Collection: '+esc(s.collection)+'</span>';
     if(s.matte && s.matte!=='none') chips += '<span class="chip">Matte: '+esc(s.matte)+'</span>';
+    if(s.library_size > 1) chips += '<span class="chip">Keeps '+esc(s.library_size)+' on TV</span>';
     if(s.source) chips += '<span class="chip">'+esc(s.source)+'</span>';
     document.getElementById('chips').innerHTML = chips;
 
@@ -200,7 +225,12 @@ CONTROL_HTML = b"""<!doctype html><html><head><meta charset="utf-8">
       img.onload=function(){ tintFavicon(img); };
       img.src='preview.jpg?t='+s.last_ts; img.hidden=false;
       document.getElementById('empty').style.display='none';
+      setMsg('', false);          // the new caption is the answer now
     }
+  }
+  function setMsg(text, bad){
+    var m=document.getElementById('msg');
+    m.textContent=text; m.className='msg'+(bad?' bad':'');
   }
   function refresh(){
     fetch('status',{cache:'no-store'})
@@ -213,13 +243,34 @@ CONTROL_HTML = b"""<!doctype html><html><head><meta charset="utf-8">
   }
   document.getElementById('go').onclick=function(){ post('next','go'); };
   document.getElementById('repush').onclick=function(){ post('repush','repush'); };
+  document.getElementById('linkform').onsubmit=function(ev){
+    ev.preventDefault();
+    var inp=document.getElementById('url'), btn=document.getElementById('show');
+    var url=inp.value.trim();
+    if(!url){ inp.focus(); return; }
+    btn.disabled=true; setMsg('', false);
+    fetch('show',{method:'POST',
+                  headers:{'Content-Type':'application/x-www-form-urlencoded'},
+                  body:'url='+encodeURIComponent(url)})
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        setMsg(d.message||'', !d.accepted);
+        if(d.accepted){ inp.value=''; }
+      })
+      .catch(function(){ setMsg('Could not reach the app', true); })
+      .then(function(){ btn.disabled=false; setTimeout(refresh, 600); });
+  };
   refresh(); setInterval(refresh, 2000);
 </script></body></html>"""
+
+
+MAX_BODY = 4096          # a URL, not an upload endpoint
 
 
 def make_server(trigger: threading.Event, status: dict,
                 repush: threading.Event | None = None,
                 wake: threading.Event | None = None,
+                on_url=None,
                 host: str = "0.0.0.0", port: int = 8099):
     debug = status.get("_debug", False)
 
@@ -242,6 +293,22 @@ def make_server(trigger: threading.Event, status: dict,
             if self.command != "HEAD":
                 self.wfile.write(body)
 
+        def _body_field(self, name: str) -> str:
+            """One field from a form-encoded (or JSON) POST body."""
+            try:
+                length = min(int(self.headers.get("Content-Length") or 0), MAX_BODY)
+            except ValueError:
+                return ""
+            if length <= 0:
+                return ""
+            raw = self.rfile.read(length).decode("utf-8", "replace")
+            if raw.lstrip().startswith("{"):
+                try:
+                    return str(json.loads(raw).get(name, ""))
+                except (ValueError, AttributeError):
+                    return ""
+            return (parse_qs(raw).get(name) or [""])[0]
+
         def do_POST(self):
             path = urlparse(self.path).path
             if path == "/next":
@@ -252,6 +319,16 @@ def make_server(trigger: threading.Event, status: dict,
                 _signal(repush)
                 log.info("manual 're-push' requested from control panel")
                 self._send(200, "application/json", b'{"queued":true}')
+            elif path == "/show":
+                url = self._body_field("url").strip()
+                if on_url is None:
+                    accepted, message = False, "showing links isn't available"
+                else:
+                    accepted, message = on_url(url)
+                log.info("link %s from control panel: %s",
+                         "accepted" if accepted else "rejected", url or "(empty)")
+                self._send(200 if accepted else 400, "application/json",
+                           json.dumps({"accepted": accepted, "message": message}).encode())
             else:
                 self._send(404, "text/plain", b"not found")
 

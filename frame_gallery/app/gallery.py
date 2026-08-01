@@ -24,7 +24,8 @@ def _blocked(art, keywords) -> bool:
     return any(k in art.tags for k in keywords)
 
 
-def _download(url: str) -> bytes | None:
+def download(url: str) -> bytes | None:
+    """Fetch image bytes, retrying once past a rate-limit. None if it won't come."""
     for attempt in range(2):
         try:
             r = requests.get(url, headers=_UA, timeout=30)
@@ -58,7 +59,7 @@ def pick(opts, history, sources, tries: int = 3):
                      and not history.seen(a.key)]
             random.shuffle(cands)
             for art in cands:
-                data = _download(art.image_url)
+                data = download(art.image_url)
                 if data:
                     return art, data
         log.info("no usable candidate yet (attempt %d/%d)", attempt, tries)

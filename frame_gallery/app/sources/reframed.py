@@ -8,6 +8,9 @@ catalogue (steady-state ~one image fetch per change). Each artwork page also
 lists its genre + collection memberships, which we fold into the work's tags so
 the family-safe keyword filter has subject/theme to match, not just the title.
 
+A single artwork page URL can also be resolved directly (normalize_artwork_url +
+artwork_from_url), which is what the panel's "Show this link" box uses.
+
 Largest public Cloudflare variant is "preview" (1400x787, ~16:9). Art is public
 domain (Wikimedia-sourced), free for personal use per the gallery's FAQ - so we
 identify ourselves, fetch gently, and credit reframed.gallery on screen.
@@ -50,9 +53,41 @@ _IMG_RE = re.compile(
 _LOC_RE = re.compile(r"<loc>\s*([^<]+?)\s*</loc>", re.I)
 _LINK_RE = re.compile(r'href="(/[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*)"')
 _COLL_RE = re.compile(r"/collections/([a-z0-9-]+)")
+_SLUG_RE = re.compile(r"[a-z0-9][a-z0-9-]*", re.I)
+_HOSTS = ("www.reframed.gallery", "reframed.gallery")
 
 def _deslug(seg: str) -> str:
     return seg.replace("-", " ").strip().title() or "Unknown"
+
+
+def normalize_artwork_url(raw: str) -> str | None:
+    """Canonical page URL for a pasted reframed.gallery artwork link, or None.
+
+    Every artwork lives at /<artist-slug>/<title-slug>, so we accept anything that
+    resolves to that shape - a full URL, a bare host path, or just the path -
+    and reject other sites and the nav/collection pages (which have no image).
+    """
+    text = (raw or "").strip().strip("<>\"'")
+    if not text:
+        return None
+    if "://" in text:
+        parsed = urlparse(text)
+        if parsed.netloc.lower().split(":")[0] not in _HOSTS:
+            return None
+        path = parsed.path
+    else:
+        path = text.split("?", 1)[0].split("#", 1)[0].lstrip("/")
+        host = next((h for h in _HOSTS if path.lower().startswith(h)), None)
+        if host:
+            path = path[len(host):]
+        elif "." in path.split("/", 1)[0]:
+            return None                     # some other host, pasted scheme-less
+    segs = [s for s in path.strip("/").split("/") if s]
+    if len(segs) != 2 or segs[0].lower() in NONART:
+        return None
+    if not all(_SLUG_RE.fullmatch(s) for s in segs):
+        return None
+    return f"{BASE}/{segs[0].lower()}/{segs[1].lower()}"
 
 
 # HA weather conditions -> a reframed collection slug that matches the mood.
@@ -196,6 +231,14 @@ class ReframedSource(ArtSource):
         )
         self._resolved[page_url] = art
         return art
+
+    def artwork_from_url(self, url: str) -> Artwork | None:
+        """Resolve one specific artwork page to an Artwork - the "show this link"
+        path. Shares _resolve()'s cache, so re-showing a link costs no fetch."""
+        page_url = normalize_artwork_url(url)
+        if not page_url:
+            return None
+        return self._resolve(page_url)
 
     def candidates(self, opts, count: int = 100) -> list[Artwork]:
         key = self.active_collection(opts) or "__all__"

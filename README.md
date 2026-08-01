@@ -14,7 +14,7 @@ instead of bolting on a cloud account or a second machine.
 
 | App | What it does | Version |
 | --- | --- | --- |
-| **[REFRAMED Gallery](frame_gallery/DOCS.md)** | Curated public-domain art on a Samsung **The Frame** TV — switches daily, never repeats, replaces in place | `0.5.0` |
+| **[REFRAMED Gallery](frame_gallery/DOCS.md)** | Curated public-domain art on a Samsung **The Frame** TV — switches daily, never repeats, or show any piece by link | `0.6.0` |
 | **[Local Faces](local_faces/DOCS.md)** | On-device **face recognition** from your cameras — recognized names become an HA sensor | `0.5.0` |
 | **[LedFX](ledfx/DOCS.md)** | Real-time **audio-reactive lighting** for WLED, fed by Music Assistant over Sendspin | `1.1.2` |
 | **[Hue Entertainment](hue_ent/DOCS.md)** | Stream LedFX effects to **Philips Hue Zigbee bulbs** on zigbee2mqtt at 20–25 fps — no Hue Bridge | `0.1.0` |
@@ -47,6 +47,12 @@ fresh, family-safe public-domain piece, fits it to the panel, and shows it in Ar
 Mode — **replacing** the previous upload so the art library never piles up, and
 **never repeating** recently shown works. No automation required.
 
+- **Or show one specific piece** — paste a reframed.gallery artwork link into the
+  panel (or set the *Show link* entity from an automation) and that exact piece
+  goes up now, whatever the collection says. Good for birthdays and holidays.
+- **Keeps a library, if you want one** — `library_size` decides how many pieces
+  stay in the TV's own art library: 1 replaces in place, 7 keeps a week you can
+  browse back through with the remote.
 - **Curated by default** — pulls from **[reframed.gallery](https://reframed.gallery)**,
   a Frame-ready public-domain collection, including **seasonal** sets that
   auto-track the date (Winter/Spring/Summer/Fall, Christmas in December, with a
@@ -61,9 +67,9 @@ Mode — **replacing** the previous upload so the art library never piles up, an
 - **Weather-aware (optional)** — point it at a weather entity and it picks a
   collection to match the day (rain → nocturnes, snow → winter, sun → summer…).
 - **HA-native** — auto-discovers the Frame from the Samsung TV integration; exposes
-  *Current Art*, *Next*, *Collection*, and *Matte* entities over MQTT; a reworked
-  sidebar panel shows the current piece (with details) plus *Show next* and
-  *Re-push to TV* buttons. Sturdy pushing with retry + optional Wake-on-LAN.
+  *Current Art*, *Next*, *Collection*, *Matte*, and *Show link* entities over MQTT;
+  a reworked sidebar panel shows the current piece (with details) plus *Show next*
+  and *Re-push to TV* buttons. Sturdy pushing with retry + optional Wake-on-LAN.
 
 → Full setup & options: [`frame_gallery/DOCS.md`](frame_gallery/DOCS.md)
 

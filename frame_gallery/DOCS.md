@@ -10,7 +10,7 @@ you control.
 | --- | --- |
 | **Unpredictable, sometimes mature** images from Google Art | Public-domain museum art + a keyword content filter + a search to shape the collection |
 | The **same pieces** over and over | Remembers the last *N* shown; never repeats until the pool is exhausted |
-| Uploads **pile up** in the art library | Upload → select → **delete the previous one**; one image, swapped in place |
+| Uploads **pile up** in the art library | A **bounded** library: one image swapped in place, or the last *N* days kept on purpose |
 | Needed an **automation** to run | A long-running service with its own interval |
 
 ## How it works
@@ -21,7 +21,8 @@ Each interval — or when you press **Show next** on the panel — it:
 2. filters them (public-domain, keyword blocklist, not shown recently);
 3. downloads one and fits it to your panel (matted like a framed print, or
    cropped to fill);
-4. pushes it to the Frame, **deleting** the piece it replaces.
+4. pushes it to the Frame, deleting its own oldest upload once the art library is
+   full (by default that's the one piece it replaces).
 
 The push is Art-Mode-aware: if you're watching TV it just sets the next art
 without interrupting; switch to Art Mode to see it. Source for v0.1: the **Art
@@ -56,6 +57,7 @@ layer is a plug-in.
 | **Fit** | `crop` | `crop` fills the panel and trims the edges; `matte` frames the whole work on a mat (nothing cropped). |
 | **Mat color** | `#141414` | Background behind matted art (hex). Dark avoids glare at night. |
 | **TV matte** (`tv_matte`) | `none` | `none` keeps the in-image fit; or a Samsung matte id (e.g. `modern_apricot`, `shadowbox_polar`) to have the **TV render a real mat** (art sent full-bleed). Unsupported ids fall back to none. |
+| **Art library size** (`library_size`) | 1 | How many pieces to keep in the TV's own art library. `1` replaces the art in place (one image, no pile-up). Set `7` to keep a week on the TV so you can browse back through past days with the remote — the oldest is deleted as a new one arrives. Only images this app uploaded are ever removed. |
 | **No-repeat memory** | 2000 | Don't repeat the last *N* pieces (0 = allow repeats). |
 | **Active hours** | *(blank)* | Blank = 24/7, or a local-time window like `07:00-23:00`. |
 | **Panel resolution** | 3840x2160 | Match your panel (1920x1080 for 32"/pre-2021). |
@@ -68,6 +70,52 @@ status pill with how many TVs were reached and when art last changed, and two
 buttons: **Show next** (pick a new piece) and **Re-push to TV** (re-send the
 current one, handy if a TV was off or got switched away).
 
+## Showing one specific piece
+
+Found something on [reframed.gallery](https://www.reframed.gallery) you want up
+*right now* — a birthday, a holiday, a room full of guests? Paste its link into
+**Show a specific piece** at the bottom of the panel and press **Show this**:
+
+```
+https://www.reframed.gallery/robert-kelsey/the-golf-links-north-berwick
+```
+
+Any form of the link works (with or without `https://`/`www.`, or just
+`/artist/artwork`), and a link that isn't a reframed.gallery artwork page is
+refused on the spot rather than blanking the TV.
+
+Because you asked for this piece by name, it skips the collection, the keyword
+filter and the no-repeat window — but it *is* added to the no-repeat history, so
+the random picker won't come straight back to it. It stays up until the next
+scheduled change (by default 04:00 the next morning), so a link pushed today is
+the art for the rest of the day.
+
+There's a **Show link** text entity for the same thing from Home Assistant — set
+it to a URL and that piece goes up. Handy in an automation:
+
+```yaml
+# Put a favourite piece up every year on a birthday
+triggers:
+  - trigger: calendar
+    entity_id: calendar.birthdays
+    event: start
+actions:
+  - action: text.set_value
+    target:
+      entity_id: text.reframed_gallery_show_link
+    data:
+      value: https://www.reframed.gallery/robert-kelsey/the-golf-links-north-berwick
+```
+
+## Keeping past days on the TV
+
+By default the app replaces its upload in place, so the Frame's art library holds
+exactly one of its images — tidy, but there's nothing to flick back to. Set
+**Art library size** to keep more: at `7`, the last seven pieces stay in the TV's
+library and you can browse them with the remote, with the oldest deleted as each
+new one arrives. Your own uploads and the Samsung Art Store pieces are untouched —
+the app only ever deletes images it uploaded itself.
+
 ## Home Assistant entities (MQTT)
 
 With the Mosquitto broker app installed (auto-detected), REFRAMED Gallery
@@ -79,6 +127,8 @@ exposes these over MQTT discovery:
 - **Next** button — change to a fresh piece now.
 - **Collection** select — switch collection (incl. `seasonal` / `weather`) live.
 - **Matte** select — switch the TV-rendered matte live.
+- **Show link** text — set a reframed.gallery artwork URL to put that exact piece
+  on the TV now.
 
 ## TV-rendered mattes
 

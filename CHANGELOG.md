@@ -1,5 +1,32 @@
 # Changelog
 
+## REFRAMED Gallery 0.6.0 — 2026-08-01
+
+Two things you asked the gallery for: show *this* piece, and stop throwing the old
+ones away.
+
+- **Show a specific piece by link** — paste a
+  [reframed.gallery](https://www.reframed.gallery) artwork URL into the new **Show
+  a specific piece** box on the panel and that exact piece goes up now. Any form of
+  the link works (with or without `https://`/`www.`, or just `/artist/artwork`), and
+  a link that isn't an artwork page is refused immediately instead of blanking the
+  TV. An explicit request skips the collection, the keyword filter and the
+  no-repeat window — but still joins the history, so the random picker won't come
+  straight back to it. The piece holds until the next scheduled change.
+- **New `text.reframed_gallery_show_link` entity** — the same thing from Home
+  Assistant, so an automation can put a favourite piece up for a birthday or a
+  holiday (`text.set_value` with the URL). Only accepted links are echoed back, so
+  the entity never shows a URL the app refused.
+- **`library_size` option — keep past days on the TV** — how many pieces stay in
+  the Frame's own art library. `1` (the default) keeps the original
+  replace-in-place behaviour; `7` keeps a week you can browse back through with the
+  remote, deleting the oldest as each new one arrives. Shrinking the number evicts
+  the surplus on the next push, a failed delete is still retried, and the app only
+  ever deletes images it uploaded itself — your own art and Art Store pieces are
+  untouched.
+- **Panel chips for both** — a *Your link* chip when the current piece came from a
+  link, and *Keeps N on TV* when the library is bigger than one.
+
 ## Hue Entertainment 0.3.0 — 2026-07-02
 
 Zero-config setup: zones now build themselves from your Home Assistant rooms

@@ -88,6 +88,13 @@ configuration:
     description: >-
       Leave blank to change art 24/7, or set a local-time window like
       07:00-23:00. Outside it the app idles and leaves the last piece up.
+  library_size:
+    name: Art library size (on the TV)
+    description: >-
+      How many pieces to keep in the TV's art library. 1 replaces the art in
+      place (one image, no pile-up). Set it to 7 to keep a week of art on the TV
+      so you can browse back through past days with the remote - the oldest is
+      deleted as a new one arrives. Only images this app uploaded are ever removed.
   avoid_repeat_count:
     name: No-repeat memory
     description: >-

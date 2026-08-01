@@ -1,14 +1,15 @@
-"""Push a JPEG to a Samsung Frame TV's Art Mode, replacing the previous one.
+"""Push a JPEG to a Samsung Frame TV's Art Mode, on a bounded art library.
 
 Built on samsungtvws (the library the core samsungtv integration uses). The
-point over a generic art-changer: uploads do NOT pile up. Each cycle uploads the
-new piece, selects it, then deletes the one it replaced - the art library stays
-at one Frame Gallery image per TV.
+point over a generic art-changer: uploads do NOT pile up without limit. We keep
+the last `library_size` images we uploaded (1 = the original replace-in-place
+behaviour) and delete only what falls off the end - so you can keep a few days of
+art on the TV to flick back through, without the library growing forever.
 
 Safety ordering, per TV:
   1. upload + select the NEW image      (throws -> change nothing; old stays up)
-  2. record new id, queue old to delete (durable, before any delete runs)
-  3. delete queued old ids               (failures retried next cycle)
+  2. record new id, queue evicted ones  (durable, before any delete runs)
+  3. delete queued ids                  (failures retried next cycle)
 Only ids we uploaded are ever deleted.
 """
 from __future__ import annotations
@@ -61,10 +62,12 @@ def _wake_on_lan(mac: str) -> None:
 
 
 class FrameTV:
-    def __init__(self, host: str, matte: str = "none", mac: str = "") -> None:
+    def __init__(self, host: str, matte: str = "none", mac: str = "",
+                 library_size: int = 1) -> None:
         self.host = host
         self.matte = matte or "none"
         self.mac = mac or ""          # optional, enables Wake-on-LAN on retry
+        self.library_size = max(1, int(library_size or 1))
         self.token_file = f"/data/tv-token-{_safe(host)}.txt"
         self.state_file = f"/data/tv-state-{_safe(host)}.json"
         self.state = self._load_state()
@@ -76,10 +79,15 @@ class FrameTV:
                     data = json.load(fh)
                     data.setdefault("current_content_id", None)
                     data.setdefault("pending_deletes", [])
+                    # library: our uploads, oldest first. Pre-0.6 state only knew
+                    # the current id, so seed the list from it.
+                    if "library" not in data:
+                        cur = data.get("current_content_id")
+                        data["library"] = [cur] if cur else []
                     return data
             except (OSError, ValueError):
                 pass
-        return {"current_content_id": None, "pending_deletes": []}
+        return {"current_content_id": None, "pending_deletes": [], "library": []}
 
     def _save_state(self) -> None:
         tmp = self.state_file + ".tmp"
@@ -88,9 +96,9 @@ class FrameTV:
         os.replace(tmp, self.state_file)
 
     def push(self, jpeg: bytes, matte: str | None = None) -> str | None:
-        """Upload+select `jpeg`, replacing this TV's previous image. Returns the
-        new content id, or None if the TV has no Art Mode. Raises on a real
-        upload/select failure (old image left intact). `matte` overrides this
+        """Upload+select `jpeg`, evicting our oldest upload once the library is
+        full. Returns the new content id, or None if the TV has no Art Mode.
+        Raises on a real upload/select failure (old image left intact). `matte` overrides this
         TV's matte for this push (so the caller can keep the rendered image and
         the matte in sync); None uses self.matte.
 
@@ -182,13 +190,23 @@ class FrameTV:
         log.info("%s: uploaded + selected %s (matte=%s, show=%s)",
                  self.host, new_id, matte, show)
 
-        old = self.state.get("current_content_id")
+        # Keep the newest `library_size` of our uploads on the TV; anything older
+        # falls off the end and is queued for deletion. Shrinking the option
+        # evicts the surplus on the next push.
+        library = [cid for cid in self.state.get("library", []) if cid != new_id]
+        library.append(new_id)
+        evicted, library = library[:-self.library_size], library[-self.library_size:]
+        self.state["library"] = library
         self.state["current_content_id"] = new_id
-        if old and old != new_id and old not in self.state["pending_deletes"]:
-            self.state["pending_deletes"].append(old)
+        for cid in evicted:
+            if cid and cid not in self.state["pending_deletes"]:
+                self.state["pending_deletes"].append(cid)
         self._save_state()
 
-        self._drain_deletes(art, keep=new_id)
+        self._drain_deletes(art, keep=set(library))
+        if self.library_size > 1:
+            log.info("%s: art library at %d/%d image(s)",
+                     self.host, len(library), self.library_size)
         return new_id
 
     def _upload(self, art, jpeg: bytes, matte: str) -> str | None:
@@ -208,10 +226,10 @@ class FrameTV:
                                   matte="none", portrait_matte="none")
             raise
 
-    def _drain_deletes(self, art, keep: str) -> None:
+    def _drain_deletes(self, art, keep: set) -> None:
         still_pending = []
         for cid in self.state.get("pending_deletes", []):
-            if cid == keep:
+            if cid in keep:
                 continue
             try:
                 art.delete(cid)

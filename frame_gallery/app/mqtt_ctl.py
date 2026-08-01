@@ -6,6 +6,8 @@ host), and subscribes to the command topics so HA can drive the app:
   - button.reframed_gallery_next         - press to change art now
   - select.reframed_gallery_collection   - switch season/collection live
   - select.reframed_gallery_matte        - switch the TV-rendered matte live
+  - text.reframed_gallery_show_link      - set a reframed.gallery artwork URL to
+                                           put that exact piece on the TV
 
 If MQTT is unavailable the app still runs (the panel + interval are unaffected).
 """
@@ -28,6 +30,8 @@ SEL_STATE = f"{NODE}/collection/state"
 SEL_CMD = f"{NODE}/collection/set"
 MATTE_STATE = f"{NODE}/matte/state"
 MATTE_CMD = f"{NODE}/matte/set"
+LINK_STATE = f"{NODE}/link/state"
+LINK_CMD = f"{NODE}/link/set"
 
 # Offered in the HA "Collection" select. "seasonal" auto-tracks the date;
 # "weather" tracks the configured HA weather entity; "all" is the whole
@@ -50,11 +54,12 @@ def _device() -> dict:
 
 
 class MqttCtl:
-    def __init__(self, opts, on_next, on_collection, on_matte=None) -> None:
+    def __init__(self, opts, on_next, on_collection, on_matte=None, on_url=None) -> None:
         self.opts = opts
         self.on_next = on_next                 # callable() -> show next now
         self.on_collection = on_collection     # callable(slug) -> switch collection
         self.on_matte = on_matte               # callable(matte_id) -> switch TV matte
+        self.on_url = on_url                   # callable(url) -> (accepted, message)
         self.client = None
         self.current_collection = (getattr(opts, "collection", "") or "seasonal")
         self.current_matte = (getattr(opts, "tv_matte", "") or "none")
@@ -124,10 +129,18 @@ class MqttCtl:
             "state_topic": MATTE_STATE, "options": MATTE_OPTIONS,
             "availability_topic": AVAIL, "icon": "mdi:image-frame",
             "device": _device()}), retain=True)
+        # A text entity, so an automation (or a dashboard field) can set one
+        # reframed.gallery artwork URL and have that exact piece go up.
+        client.publish(f"homeassistant/text/{NODE}/link/config", json.dumps({
+            "name": "Show link", "object_id": f"{NODE}_show_link",
+            "unique_id": f"{NODE}_show_link", "command_topic": LINK_CMD,
+            "state_topic": LINK_STATE, "max": 255, "mode": "text",
+            "availability_topic": AVAIL, "icon": "mdi:link-variant",
+            "device": _device()}), retain=True)
         client.publish(AVAIL, "online", retain=True)
         client.publish(SEL_STATE, self.current_collection, retain=True)
         client.publish(MATTE_STATE, self.current_matte, retain=True)
-        client.subscribe([(NEXT_CMD, 0), (SEL_CMD, 0), (MATTE_CMD, 0)])
+        client.subscribe([(NEXT_CMD, 0), (SEL_CMD, 0), (MATTE_CMD, 0), (LINK_CMD, 0)])
         log.info("MQTT connected; REFRAMED Gallery entities announced")
 
     def _on_message(self, _client, _userdata, msg) -> None:
@@ -151,6 +164,14 @@ class MqttCtl:
                 self.client.publish(MATTE_STATE, payload, retain=True)
             if self.on_matte:
                 self.on_matte(payload)
+        elif msg.topic == LINK_CMD and payload:
+            accepted, message = self.on_url(payload) if self.on_url else (False, "unavailable")
+            log.info("HA set link -> %s (%s: %s)", payload,
+                     "accepted" if accepted else "rejected", message)
+            # Echo the link back only once it's queued, so the entity never shows
+            # a URL the app refused.
+            if accepted and self.client:
+                self.client.publish(LINK_STATE, payload[:255], retain=True)
 
     def publish_current(self, art) -> None:
         if not self.client:
