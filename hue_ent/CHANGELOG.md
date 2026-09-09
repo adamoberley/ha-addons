@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.3.1 — 2026-09-08
+
+- **Fixed: auto zones found no rooms** — area discovery aborted with
+  `too many values to unpack (expected 2)` on every attempt, so a correctly
+  configured Hue setup ended up with no zones
+  ([#12](https://github.com/adamoberley/ha-addons/issues/12)). The Home Assistant
+  device registry is shared by every integration on the box and HA doesn't
+  validate what each one stores in a device's `identifiers`, so a single odd
+  entry — a flat list, a three-element tuple — killed the whole pass. Discovery
+  now skips (and names) an entry it can't read and finds Zigbee addresses by
+  pattern anywhere in the entry, so one integration's quirk can't hide your
+  rooms.
+- **Rooms assigned on the entity now work too.** A light whose *area* was set on
+  the entity rather than the device was invisible to discovery; entity area
+  overrides are now honored, and a bulb whose Home Assistant device carries no
+  Zigbee address is matched by its `light.<name>` entity id instead.
+- **The panel says what happened.** When no rooms come back it now shows the
+  reason — lights not assigned to areas, a registry read that failed, auto zones
+  switched off — instead of always claiming no color bulbs were found. The log
+  gained the same summary (how many lights matched, how many areas exist).
+- Adaptive Lighting master switches are also matched by the switch's own area,
+  not just by name, while its `sleep_mode` / `adapt_brightness` / `adapt_color`
+  sub-switches are never picked as the pause entity.
+- Added tests for the registry parser (`python -m pytest hue_ent/tests`).
+
 ## 0.3.0 — 2026-07-02
 
 - **Auto zones**: color-capable Hue bulbs are grouped by Home Assistant area —

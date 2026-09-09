@@ -112,6 +112,23 @@ bulbs — they won't get stranded mid-effect.
 Automation ideas: turn the switch on when your media player starts and off when
 it stops, or expose it on a dashboard next to your LedFX panel.
 
+## Troubleshooting
+
+- **No rooms in the panel.** The panel says which of these it is:
+  - *Waiting for zigbee2mqtt* — the app hasn't seen `zigbee2mqtt/bridge/devices`
+    yet. Check the Z2M base topic and MQTT credentials.
+  - *None of your Philips lights is assigned to an area* — assign the bulbs (or
+    their light entities) to areas in **Settings → Areas**, then **Rescan rooms**.
+  - *Rooms could not be read* — the Home Assistant API call failed; the app log
+    has the error. **Rescan rooms** retries.
+  - *Auto zones are off* — turn on `auto_zones`, or define manual `zones:`.
+- **A room is missing one bulb.** White-ambiance-only bulbs can't render color
+  streams, so they're listed as skipped rather than added. A zone also stops at
+  10 bulbs (a hard limit of the frame format).
+- **Only some rooms appear.** Discovery skips device registry entries it cannot
+  read and logs them (`skipped N unreadable device registry entr(ies)`) — if one
+  of your Hue bulbs is in that list, please open an issue with the log line.
+
 ## How it works / limits
 
 - Uses zigbee2mqtt as a dumb relay (`zclcommand` on `<friendly_name>/set`) —

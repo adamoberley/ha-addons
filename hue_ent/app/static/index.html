@@ -73,6 +73,8 @@
 "use strict";
 let STATE = null;
 const $ = (sel, el) => (el || document).querySelector(sel);
+const esc = (t) => String(t).replace(/[&<>"']/g, (c) =>
+  ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
 
 function toast(text) {
   const el = $("#msg");
@@ -93,9 +95,22 @@ function render() {
   const host = $("#zones");
   host.innerHTML = "";
   if (!STATE.rooms.length) {
-    host.innerHTML = `<div class="empty">${STATE.devices_seen
-      ? "No rooms with color-capable Philips Hue bulbs found.<br>Assign your Hue bulbs to areas in Home Assistant, then hit Rescan."
-      : "Waiting for zigbee2mqtt…"}</div>`;
+    const d = STATE.discovery || {};
+    let why;
+    if (!STATE.devices_seen) {
+      why = "Waiting for zigbee2mqtt…";
+    } else if (!STATE.auto_zones) {
+      why = "Auto zones are off. Turn on <b>auto_zones</b> in the app configuration " +
+            "to build zones from your Home Assistant rooms, or add manual zones there.";
+    } else if (d.summary) {
+      // Say exactly what discovery found (or why it failed) instead of guessing.
+      why = esc(d.summary);
+      if (!d.ok) why += "<br><small>Hit Rescan to try again — the app log has the detail.</small>";
+    } else {
+      why = "No rooms with color-capable Philips Hue bulbs found.<br>" +
+            "Assign your Hue bulbs to areas in Home Assistant, then hit Rescan.";
+    }
+    host.innerHTML = `<div class="empty">${why}</div>`;
     return;
   }
   for (const room of STATE.rooms) host.appendChild(card(room));

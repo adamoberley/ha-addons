@@ -1,5 +1,17 @@
 # Changelog
 
+## Hue Entertainment 0.3.1 — 2026-09-08
+
+**Auto zones found no rooms.** Area discovery aborted with `too many values to
+unpack (expected 2)` on every attempt — including *Rescan rooms* — leaving a
+correctly configured Hue setup with no zones
+([#12](https://github.com/adamoberley/ha-addons/issues/12)). Home Assistant's
+device registry is shared by every integration on the box, and one entry that
+didn't match the documented shape took the whole pass down with it. Discovery is
+now shape-tolerant (unreadable entries are skipped and named, Zigbee addresses
+found by pattern), also honors rooms assigned on the *entity* instead of the
+device, and the sidebar panel now shows *why* no rooms came back rather than
+always blaming missing color bulbs.
 ## LedFX 1.7.2 — 2026-09-08
 
 **Sendspin audio couldn't connect at all.** Every attempt failed before it reached

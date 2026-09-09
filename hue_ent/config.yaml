@@ -7,7 +7,7 @@
 # entertainment commands aimed at one "proxy" bulb per zone, which re-broadcasts
 # to the rest. Requires zigbee2mqtt >= 2.1.1 and color-capable Hue bulbs.
 name: Hue Entertainment
-version: "0.3.0"
+version: "0.3.1"
 slug: hue_ent
 description: >-
   Audio-reactive Hue: stream LedFX effects to Philips Hue Zigbee bulbs on
