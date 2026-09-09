@@ -3,7 +3,7 @@
 # no longer forcing a reconnect while the stream is idle (the old "no audio for
 # 20s -> reconnect" churn), plus Sendspin now-playing metadata. Pinned to a SHA
 # for reproducibility; bump it to move forward. ledfx resolves the rest of its
-# deps (numpy, aiosendspin, pyflac, python-mbedtls, ...) with its own pins.
+# deps (numpy, pyflac, python-mbedtls, ...) with its own pins.
 #
 # Upstream still self-reports version 2.1.9 on this commit; confirm the build via
 # /api/info github_sha (90bebef8...), not the version string.
@@ -11,3 +11,24 @@ pkgconfig>=1.5.5
 setuptools>=69.0.3
 wheel>=0.42.0
 ledfx @ git+https://github.com/LedFx/LedFx.git@90bebef841fc69e6c09220918b8853543a09756b
+
+# Sendspin client library, pinned BELOW 7.0 on purpose.
+#
+# ledfx asks for a bare `aiosendspin>=4.0.0`, so an unconstrained build picks up
+# whatever is newest - and aiosendspin 7.0 replaced the client's `client_id`
+# argument with an X25519 `identity` plus a required `pairing_store` (the Noise
+# handshake). Against 7.0+ every ledfx connection attempt dies before it reaches
+# the network with:
+#
+#   SendspinClient.__init__() got an unexpected keyword argument 'client_id'
+#
+# 6.x speaks the pre-Noise ("legacy") wire format, which Music Assistant still
+# accepts by default (its Sendspin provider defaults `allow_legacy_clients` to
+# true). Upstream LedFX caps the same range on main (aiosendspin>=6.0.5,<7.0.0);
+# we pin the exact last 6.x release so the image is reproducible. patch_backend.py
+# asserts the resolved version still accepts `client_id`, so a drifting pin fails
+# the build loudly instead of shipping a bridge that can never connect.
+#
+# To move past this: bump the ledfx SHA to a commit whose Sendspin client builds
+# an `Identity`/`ClientPairingStore`, then raise this pin in the same change.
+aiosendspin==6.1.1

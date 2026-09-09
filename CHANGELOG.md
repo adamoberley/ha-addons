@@ -1,5 +1,18 @@
 # Changelog
 
+## LedFX 1.7.2 — 2026-09-08
+
+**Sendspin audio couldn't connect at all.** Every attempt failed before it reached
+the network with `SendspinClient.__init__() got an unexpected keyword argument
+'client_id'`, so the lights never heard Music Assistant
+([#11](https://github.com/adamoberley/ha-addons/issues/11)). `aiosendspin` 7.0
+replaced the client's `client_id` with an X25519 identity plus a pairing store, and
+LedFX still asks for a bare `aiosendspin>=4.0.0` — so any image built after 7.0
+shipped got an incompatible library. Now pinned to `aiosendspin==6.1.1` (the range
+upstream LedFX itself caps to), and the build *verifies* the client API so a future
+dependency drift fails loudly instead of shipping silent-audio lights. **Rebuild
+the app** after updating so the image picks up the pin.
+
 ## REFRAMED Gallery 0.6.0 — 2026-08-01
 
 Two things you asked the gallery for: show *this* piece, and stop throwing the old
