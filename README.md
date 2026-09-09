@@ -14,10 +14,10 @@ instead of bolting on a cloud account or a second machine.
 
 | App | What it does | Version |
 | --- | --- | --- |
-| **[REFRAMED Gallery](frame_gallery/DOCS.md)** | Curated public-domain art on a Samsung **The Frame** TV — switches daily, never repeats, or show any piece by link | `0.6.0` |
-| **[Local Faces](local_faces/DOCS.md)** | On-device **face recognition** from your cameras — recognized names become an HA sensor, with an ignore list for faces that aren't people | `0.6.0` |
+| **[REFRAMED Gallery](frame_gallery/DOCS.md)** | Curated public-domain art on a Samsung **The Frame** TV — switches daily, never repeats, or show any piece by link | `0.6.1` |
+| **[Local Faces](local_faces/DOCS.md)** | On-device **face recognition** from your cameras — recognized names become an HA sensor, with an ignore list for faces that aren't people | `0.6.1` |
 | **[LedFX](ledfx/DOCS.md)** | Real-time **audio-reactive lighting** for WLED, fed by Music Assistant over Sendspin | `1.7.2` |
-| **[Hue Entertainment](hue_ent/DOCS.md)** | Stream LedFX effects to **Philips Hue Zigbee bulbs** on zigbee2mqtt at 20–25 fps — no Hue Bridge | `0.3.1` |
+| **[Hue Entertainment](hue_ent/DOCS.md)** | Stream LedFX effects to **Philips Hue Zigbee bulbs** on zigbee2mqtt at 20–25 fps — no Hue Bridge | `0.3.2` |
 
 ## Install
 
@@ -182,11 +182,29 @@ special coordinator firmware.
 
 Each app is a self-contained folder — `frame_gallery/`, `local_faces/`,
 `ledfx/`, `hue_ent/` — with its own `Dockerfile`, `config.yaml` (manifest +
-version + options schema), and `DOCS.md`. Versions are bumped independently in
-each `config.yaml`; release notes live in the repo-wide
-[`CHANGELOG.md`](CHANGELOG.md) (LedFX also keeps a per-app `ledfx/CHANGELOG.md`
-for its in-app Changelog tab). Python is linted with
-[ruff](https://docs.astral.sh/ruff/) (`ruff.toml`).
+version + options schema), `DOCS.md`, and `CHANGELOG.md` (Home Assistant shows
+that one in the store). Versions are bumped independently in each `config.yaml`;
+the same notes are collected in the repo-wide
+[`CHANGELOG.md`](CHANGELOG.md).
+
+Python is linted with [ruff](https://docs.astral.sh/ruff/) (`ruff.toml`) and
+tested with pytest — from the repo root:
+
+```bash
+python -m pytest && ruff check .
+```
+
+Tests live next to what they cover (`hue_ent/tests/`, `local_faces/tests/`) plus
+`tests/test_repo_consistency.py`, which keeps the manifests, this README's
+version table, and the changelogs from drifting apart. They need only the pure
+Python deps (`pytest pytest-asyncio pyyaml aiohttp aiomqtt requests numpy
+opencv-python-headless`) — nothing compiles. Both run in CI
+([`.github/workflows/ci.yaml`](.github/workflows/ci.yaml)) on every push and
+pull request.
+
+**Releasing an app:** bump its `config.yaml` version, add the entry to both
+changelogs and the table above (the consistency tests check all three), then tag
+`<slug>-v<version>` and write the GitHub release from the app's changelog entry.
 
 **Why one repo (not branches per app):** this is the standard Home Assistant
 *app/add-on repository* layout — the Supervisor reads every app folder from a

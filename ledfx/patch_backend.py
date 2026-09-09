@@ -63,7 +63,8 @@ def patch_audio_delay() -> None:
 
     hits = src.count(AUDIO_ANCHOR)
     if hits != 1:
-        print(f"[patch-backend] WARNING: audio delay anchor found {hits}x (expected 1) - NOT patching")
+        print(f"[patch-backend] WARNING: audio delay anchor found {hits}x"
+              " (expected 1) - NOT patching")
         return
 
     src = src.replace(AUDIO_ANCHOR, AUDIO_MERGE, 1)
@@ -86,7 +87,8 @@ def patch_effect_names() -> None:
         total += n
         print(f"[patch-backend] de-Blade effect name in {os.path.basename(path)}: {n}")
     if not total:
-        print("[patch-backend] note: no 'NAME = \"Blade ' effect names found (may already be patched)")
+        print("[patch-backend] note: no 'NAME = \"Blade ' effect names found"
+              " (may already be patched)")
 
 
 def check_sendspin_client() -> None:

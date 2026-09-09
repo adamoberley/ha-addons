@@ -4,3 +4,10 @@ configuration:
     description: >-
       How much LedFX writes to the app log. Use info for normal running;
       switch to debug only while troubleshooting (it is very chatty), then back.
+  sendspin_delay_ms:
+    name: Sendspin audio delay (ms)
+    description: >-
+      Shifts the Sendspin audio LedFX reacts to, so the lights line up with
+      what you hear (0-5000 ms). Set it here rather than in the LedFX UI: the
+      UI's delay control resets the Sendspin audio source. Applied on start -
+      restart the app after changing it, then tune by eye against the music.

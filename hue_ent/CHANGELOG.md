@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.2 — 2026-09-09
+
+- **Fixed: a zone armed with nothing streaming never let go.** Arming from the
+  Home Assistant switch (or the panel's test button) when LedFX isn't sending
+  anything left the zone armed indefinitely — switch stuck on, and the room's
+  Adaptive Lighting switch held off, because the idle timeout only started
+  counting from the *first* DDP frame. Idleness is now measured from the arm
+  when no frame has arrived, so such a zone disarms after `idle_timeout_s`,
+  restores the bulbs and hands Adaptive Lighting back.
+- Added tests for the streaming ticker (arm-with-no-stream, a stream that stops,
+  a live stream, and the static-frame keepalive).
+
 ## 0.3.1 — 2026-09-08
 
 - **Fixed: auto zones found no rooms** — area discovery aborted with

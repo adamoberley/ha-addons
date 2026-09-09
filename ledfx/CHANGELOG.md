@@ -16,6 +16,8 @@
 - The build now **verifies** the Sendspin client API instead of trusting it: if a
   future dependency bump drops `client_id`, the image fails to build with a clear
   message rather than installing an app whose audio can never connect.
+- The **Sendspin audio delay** option now has a name and a description in the
+  Home Assistant config UI, instead of showing up as a bare key.
 
 ## 1.7.1 — 2026-06-25
 

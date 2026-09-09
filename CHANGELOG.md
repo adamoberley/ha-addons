@@ -1,5 +1,45 @@
 # Changelog
 
+## Local Faces 0.6.1 — 2026-09-09
+
+**Notifications no longer hold up recognition.** The push was sent inline, so a
+notify service that answered slowly (or timed out) stalled the recognition loop
+— every camera waited behind it. Sending now happens on a background worker with
+a bounded queue: if a service is wedged, alerts are dropped rather than cameras
+going blind. The MQTT client also declares its callback API version, so the app
+runs on paho-mqtt 2.x as well as 1.x.
+
+## Hue Entertainment 0.3.2 — 2026-09-09
+
+**A zone armed with nothing streaming never let go.** Arming from the Home
+Assistant switch (or the panel's test button) while LedFX was sending nothing
+left the zone armed indefinitely — switch stuck on, and the room's Adaptive
+Lighting switch held off — because the idle timeout only started counting at the
+*first* DDP frame. Idleness is now measured from the arm when no frame has
+arrived, so the zone disarms after `idle_timeout_s`, restores the bulbs and hands
+Adaptive Lighting back.
+
+## REFRAMED Gallery 0.6.1 — 2026-09-09
+
+Housekeeping: the MQTT client declares its callback API version, so the app runs
+on paho-mqtt 2.x as well as 1.x, and the app now ships its own `CHANGELOG.md` so
+Home Assistant shows release notes in the store. No change to the entities or the
+art.
+
+## Repo-wide — 2026-09-09
+
+Not a release of its own; the pass that produced the three above.
+
+- **Every app ships a `CHANGELOG.md`**, back-filled from this file, so all four
+  show release notes in the Home Assistant store.
+- **CI + tests.** GitHub Actions now runs ruff, the test suite, and a manifest
+  parse on every push and PR. `tests/test_repo_consistency.py` checks that each
+  app's manifest version, README row and both changelogs agree, that every option
+  has a schema entry *and* a translated label, and that `build.yaml` arches match
+  the manifest — the README version table had silently drifted three LedFX
+  releases behind, and LedFX's *Sendspin audio delay* option had no label in the
+  config UI (both fixed). The repo is ruff-clean.
+
 ## Local Faces 0.6.0 — 2026-09-08
 
 **Ignore the faces that aren't people.** A poster, a photo frame, a paused TV, the
@@ -38,6 +78,9 @@ shipped got an incompatible library. Now pinned to `aiosendspin==6.1.1` (the ran
 upstream LedFX itself caps to), and the build *verifies* the client API so a future
 dependency drift fails loudly instead of shipping silent-audio lights. **Rebuild
 the app** after updating so the image picks up the pin.
+
+Also: the *Sendspin audio delay* option finally has a name and a description in
+the Home Assistant config UI instead of showing as a bare key.
 
 
 ## REFRAMED Gallery 0.6.0 — 2026-08-01

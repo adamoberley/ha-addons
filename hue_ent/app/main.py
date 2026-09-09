@@ -105,6 +105,7 @@ class ZoneRunner:
         self.counter = 0
         self.saved_states: dict[str, dict | None] = {}
         self._ticker: asyncio.Task | None = None
+        self._armed_at = 0.0
         self._last_zig_send = 0.0
         self._last_sent_frame: list[tuple[int, int, int]] | None = None
         # Set by a manual switch-off: don't auto-arm again for the SAME DDP
@@ -146,6 +147,7 @@ class ZoneRunner:
         await asyncio.sleep(0.3)
         await self._arm_ritual()
         self.armed = True
+        self._armed_at = time.monotonic()
         self._last_zig_send = 0.0
         self._last_sent_frame = None
         await self.bridge.publish(self.zone.switch_state_topic, "ON", retain=True)
@@ -236,13 +238,19 @@ class ZoneRunner:
                 next_tick = max(next_tick + interval, time.monotonic())
 
                 ddp = self.ddp
-                if ddp is None or ddp.latest is None:
-                    continue
-                idle_for = time.monotonic() - ddp.last_rx
+                # Idle is measured from the last frame, or from the arm when no
+                # frame has ever arrived - otherwise a zone armed with nothing
+                # streaming (an HA switch, the panel's test button, a LedFX that
+                # never starts) stays armed forever, holding its pause entities
+                # off and its switch on.
+                last_rx = ddp.last_rx if (ddp and ddp.last_rx) else self._armed_at
+                idle_for = time.monotonic() - last_rx
                 if idle_for > self.zone.idle_timeout_s:
                     LOG.info("[%s] no DDP for %.0fs - auto-disarming", self.zone.name, idle_for)
                     asyncio.get_running_loop().create_task(self.disarm())
                     return
+                if ddp is None or ddp.latest is None:
+                    continue
 
                 frame = ddp.latest
                 fresh = frame != self._last_sent_frame

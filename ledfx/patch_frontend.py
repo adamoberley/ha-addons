@@ -124,7 +124,8 @@ ROBOTO_FACE = (
 def _replace(src: str, old: str, new: str, label: str, expect=None) -> tuple[str, int]:
     n = src.count(old)
     if expect is not None and n != expect:
-        print(f"[patch] WARNING: {label}: expected {expect} hit(s), found {n} - frontend may have changed")
+        print(f"[patch] WARNING: {label}: expected {expect} hit(s), found {n}"
+              " - frontend may have changed")
     return src.replace(old, new), n
 
 
