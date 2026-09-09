@@ -1,5 +1,16 @@
 # Changelog
 
+## Hue Entertainment 0.4.0 — 2026-09-09
+
+**The panel now shows what's actually happening.** Every zone card carries one
+line of live state — the DDP frames arriving from LedFX, the Zigbee frames going
+out, how long since the last frame — plus each bulb's Zigbee **signal** with a ★
+on the strongest in the room. Those are the numbers every "nothing moves" or "it
+stutters" question needs, and none of them were visible before: a zone nothing
+has ever streamed to now says *no DDP yet on :4049 — point a LedFX device here*
+instead of just sitting there. Values are patched in place, so a card you're
+editing keeps its unsaved changes.
+
 ## Local Faces 0.7.0 — 2026-09-09
 
 **A presence sensor for every person, and the app finds the posters for you.**

@@ -15,6 +15,7 @@ discovery; arming captures bulb state (and pauses e.g. Adaptive Lighting via
 from __future__ import annotations
 
 import asyncio
+import collections
 import contextlib
 import json
 import logging
@@ -35,6 +36,16 @@ BASE_TOPIC = "hue_ent"
 AVAILABILITY_TOPIC = f"{BASE_TOPIC}/availability"
 KEEPALIVE_S = 4.0  # bulbs drop out of entertainment mode after a few silent seconds
 REARM_GAP_S = 6.0  # a zigbee-send gap longer than this means the mode has expired
+
+
+def _rate(stamps) -> float:
+    """Frames per second over a deque of monotonic timestamps (0 if stale/empty)."""
+    if len(stamps) < 2:
+        return 0.0
+    span = stamps[-1] - stamps[0]
+    if span <= 0 or time.monotonic() - stamps[-1] > 2.0:
+        return 0.0
+    return round((len(stamps) - 1) / span, 1)
 
 
 def load_options() -> dict:
@@ -83,6 +94,10 @@ class DdpProtocol(asyncio.DatagramProtocol):
         self.latest: list[tuple[int, int, int]] | None = None
         self.last_rx = 0.0
         self.frames_rx = 0
+        # Arrival times of the last few frames, for the rate the panel shows:
+        # "is LedFX actually sending to this zone?" is the first question of
+        # every setup problem, and the answer used to be invisible.
+        self._arrivals: collections.deque[float] = collections.deque(maxlen=64)
 
     def datagram_received(self, data: bytes, addr) -> None:
         if len(data) < 10 + self.pixel_count * 3:
@@ -92,7 +107,12 @@ class DdpProtocol(asyncio.DatagramProtocol):
         self.latest = [(body[i * 3], body[i * 3 + 1], body[i * 3 + 2]) for i in px]
         self.last_rx = time.monotonic()
         self.frames_rx += 1
+        self._arrivals.append(self.last_rx)
         self.on_activity()
+
+    @property
+    def rx_fps(self) -> float:
+        return _rate(self._arrivals)
 
 
 class ZoneRunner:
@@ -106,6 +126,8 @@ class ZoneRunner:
         self.saved_states: dict[str, dict | None] = {}
         self._ticker: asyncio.Task | None = None
         self._armed_at = 0.0
+        self.sends = 0                     # Zigbee frames pushed to the proxy
+        self._sent_at: collections.deque[float] = collections.deque(maxlen=64)
         self._last_zig_send = 0.0
         self._last_sent_frame: list[tuple[int, int, int]] | None = None
         # Set by a manual switch-off: don't auto-arm again for the SAME DDP
@@ -122,6 +144,27 @@ class ZoneRunner:
             self._suppress_auto = False
         if not self.armed and self.zone.auto_start and not self._suppress_auto:
             self.bridge.schedule_arm(self.zone.slug, reason="ddp")
+
+    @property
+    def stats(self) -> dict:
+        """What the zone is doing right now, for the sidebar panel.
+
+        Ages are None when the thing hasn't happened yet, so the panel can tell
+        "nothing has ever arrived on this port" (a LedFX device pointed
+        somewhere else) apart from "the stream stopped a minute ago".
+        """
+        now = time.monotonic()
+        ddp = self.ddp
+        return {
+            "armed": self.armed,
+            "armed_for_s": round(now - self._armed_at, 1) if self.armed else None,
+            "frames_rx": ddp.frames_rx if ddp else 0,
+            "rx_fps": ddp.rx_fps if ddp else 0.0,
+            "last_rx_age_s": (round(now - ddp.last_rx, 1)
+                              if ddp and ddp.last_rx else None),
+            "sends": self.sends,
+            "tx_fps": _rate(self._sent_at),
+        }
 
     def manual_off(self) -> asyncio.Task:
         """Switch turned off in HA: stay off for the rest of this DDP stream."""
@@ -287,6 +330,8 @@ class ZoneRunner:
             protocol.stream_frame_payload(self.counter, smoothing, records),
         )
         self._last_zig_send = time.monotonic()
+        self._sent_at.append(self._last_zig_send)
+        self.sends += 1
         self._last_sent_frame = list(frame)
 
 

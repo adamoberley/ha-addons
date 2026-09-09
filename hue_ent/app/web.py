@@ -6,6 +6,11 @@ on those: per-room cards with light reordering, a per-bulb "blink" button to
 identify fixtures, proxy selection, fps/brightness, and enable toggles. Edits
 persist to the zone store and apply live (no app restart).
 
+It also answers "is anything actually happening?": each card reports the DDP
+frames arriving from LedFX, the Zigbee frames going out, and each bulb's link
+quality - the three numbers every "it stutters" or "nothing moves" question
+needs, and none of which were visible before.
+
 Everything is same-origin and relative-path, so it works both through HA
 ingress and directly on the LAN port.
 """
@@ -22,12 +27,29 @@ LOG = logging.getLogger("hue_ent.web")
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
 
+def _link_quality(bridge, lights) -> dict[str, int]:
+    """Last-reported Zigbee link quality per light, where z2m gave us one."""
+    out = {}
+    for fn in lights:
+        state = bridge.light_states.get(fn) or {}
+        lqi = state.get("linkquality")
+        if isinstance(lqi, (int, float)):
+            out[fn] = int(lqi)
+    return out
+
+
 def _state(bridge) -> dict:
     rooms = []
     for view in bridge.room_views:
         slug = view["slug"]
         runner = bridge.runners.get(slug)
         cfg = view["config"]
+        lights = cfg.get("lights", [])
+        lqi = _link_quality(bridge, lights)
+        # The bulb the coordinator hears best is the best *starting point* for a
+        # proxy (LQI is measured to the coordinator, not between bulbs), so it's
+        # offered as a hint rather than applied.
+        strongest = max(lqi, key=lqi.get) if lqi else None
         rooms.append({
             "slug": slug,
             "source": view["source"],
@@ -35,7 +57,10 @@ def _state(bridge) -> dict:
             "armed": bool(runner and runner.armed),
             "active": slug in bridge.zones,
             "name": cfg.get("name", slug),
-            "lights": cfg.get("lights", []),
+            "lights": lights,
+            "link_quality": lqi,
+            "strongest_light": strongest,
+            "stats": runner.stats if runner else None,
             "available_lights": view["available_lights"],
             "skipped": view.get("skipped", []),
             "proxy": cfg.get("proxy") or (cfg.get("lights") or [None])[0],
