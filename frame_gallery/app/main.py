@@ -8,6 +8,10 @@ active_hours. No automation needed.
 Paste a reframed.gallery artwork link into the panel (or the HA "Show link" text
 entity) and that exact piece goes up instead - filters and no-repeat don't apply
 to something you asked for by name.
+
+"Never show this" (panel button or the HA Hide button) drops the current piece
+into a persisted hidden list and immediately picks a replacement, so a piece you
+don't want off your wall is gone in one click instead of a keyword-filter puzzle.
 """
 from __future__ import annotations
 
@@ -48,6 +52,7 @@ _trigger = threading.Event()        # intent: pick a fresh piece
 _repush = threading.Event()         # intent: re-send the current image as-is
 _remat = threading.Event()          # intent: re-render the current piece with the new matte
 _direct = threading.Event()         # intent: show the queued reframed.gallery link
+_hide = threading.Event()           # intent: hide the current piece, then pick another
 
 
 def _setup_logging(level_name: str) -> None:
@@ -122,7 +127,8 @@ def main() -> int:
         "title": "", "artist": "", "year": "", "medium": "", "movement": "",
         "credit": "", "source": opts.source,
         "collection": opts.collection, "matte": opts.tv_matte,
-        "tv_count": len(tvs), "tv_ok": 0, "link": "",
+        "tv_count": len(tvs), "tv_ok": 0, "link": "", "key": "",
+        "hidden_count": len(history.hidden),
         "interval_minutes": opts.interval_minutes, "daily_time": opts.daily_time,
         "library_size": opts.library_size,
         "_debug": opts.log_level == "debug",
@@ -135,6 +141,30 @@ def main() -> int:
     def _show_next():
         _trigger.set()
         _wake.set()
+
+    def _hide_current():
+        """Never show the current piece again, then pick a replacement now.
+
+        Answers the click immediately (the pick happens on the loop) and returns
+        (hidden, message) so the panel can say what happened."""
+        key = status.get("key") or ""
+        if not key:
+            return False, "Nothing is showing yet"
+        title = status.get("title") or "this piece"
+        if not history.hide(key):
+            return False, f"'{title}' is already hidden"
+        status["hidden_count"] = len(history.hidden)
+        log.info("hiding '%s' (%s) - %d hidden in total", title, key, len(history.hidden))
+        _hide.set()
+        _wake.set()
+        return True, f"Hidden '{title}' - picking another"
+
+    def _unhide_all():
+        count = history.unhide_all()
+        status["hidden_count"] = 0
+        log.info("un-hid %d piece(s)", count)
+        return True, (f"{count} piece(s) can appear again" if count
+                      else "Nothing was hidden")
 
     def _set_collection(slug):
         if reframed_src is not None:
@@ -165,11 +195,13 @@ def main() -> int:
         _wake.set()
         return True, "Fetching your piece…"
 
-    mqttctl = MqttCtl(opts, _show_next, _set_collection, _set_matte, _queue_url)
+    mqttctl = MqttCtl(opts, _show_next, _set_collection, _set_matte, _queue_url,
+                      on_hide=_hide_current)
     mqttctl.start()
 
     httpd = server.make_server(_trigger, status, _repush, _wake,
-                               on_url=_queue_url, port=SERVER_PORT)
+                               on_url=_queue_url, on_hide=_hide_current,
+                               on_unhide=_unhide_all, port=SERVER_PORT)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     log.info("control panel on :%d", SERVER_PORT)
     sched = (f"daily at {opts.daily_time}" if opts.daily_time
@@ -226,7 +258,7 @@ def main() -> int:
         status.update(title=art.title, artist=art.artist, credit=art.credit,
                       year=getattr(art, "year", ""), medium=getattr(art, "medium", ""),
                       movement=getattr(art, "movement", ""), source=art.source,
-                      link=link)
+                      link=link, key=art.key)
         _record(ok)
         log.info("showing '%s' by %s (%s) -> %d/%d TV(s)",
                  art.title, art.artist, art.credit, ok, len(tvs))
@@ -333,11 +365,12 @@ def main() -> int:
             # forward and skip that day's scheduled change.
             wait_s = _seconds_until(opts.daily_time, now) or opts.interval_seconds
             want_direct = _direct.is_set()
-            want_next = _trigger.is_set()
+            want_next = _trigger.is_set() or _hide.is_set()
             want_remat = _remat.is_set()
             want_repush = _repush.is_set()
             _direct.clear()
             _trigger.clear()
+            _hide.clear()
             _remat.clear()
             _repush.clear()
             _wake.clear()

@@ -3,6 +3,7 @@
 Filters applied to every candidate:
   - public-domain only (if enabled)
   - family-safe keyword blocklist (title/artist/department/classification/terms)
+  - not hidden by hand (the panel's "Never show this" button)
   - not shown recently (the no-repeat history)
 The first survivor whose image actually downloads wins; if a batch yields
 nothing usable we re-roll (a fresh random page) a few times.
@@ -56,6 +57,7 @@ def pick(opts, history, sources, tries: int = 3):
             cands = [a for a in pool
                      if (not opts.public_domain_only or a.public_domain)
                      and not _blocked(a, opts.exclude_keywords)
+                     and not history.is_hidden(a.key)
                      and not history.seen(a.key)]
             random.shuffle(cands)
             for art in cands:

@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.7.0 — 2026-09-09
+
+- **"Never show this."** Curated doesn't mean *to your taste* — when a piece goes
+  up that you'd rather not look at all day, one press on the panel retires it for
+  good and picks a replacement immediately. The hidden list lives in `/data` next
+  to the no-repeat history, so it survives restarts; the panel shows how many
+  pieces are hidden with an **Un-hide all** next to it. Previously the only way
+  to get rid of a specific piece was to guess a keyword filter that excluded it.
+- **New `button.reframed_gallery_hide` entity** — the same thing from Home
+  Assistant, so a dashboard tile (or a voice assistant) can retire a piece
+  without opening the panel.
+- Added tests for the history/hidden store and the panel's endpoints.
+
 ## 0.6.1 — 2026-09-09
 
 - MQTT client creation is now explicit about its callback API version, so the

@@ -5,10 +5,12 @@ work under the ingress token path.
   - `trigger` is set by "Show next" to request a fresh pick.
   - `repush` is set by "Re-push to TV" to re-send the current image.
   - `on_url` validates+queues a pasted reframed.gallery link ("Show this").
+  - `on_hide` hides the current piece for good and picks another right away;
+    `on_unhide` clears that list.
   - `status` is a dict the loop updates and the panel reads.
 
 Endpoints: GET / (panel), /status (JSON), /preview.jpg, /healthz;
-POST /next, /repush, /show.
+POST /next, /repush, /show, /hide, /unhide.
 """
 from __future__ import annotations
 
@@ -86,6 +88,12 @@ CONTROL_HTML = b"""<!doctype html><html><head><meta charset="utf-8">
   button.ghost { background:var(--chip); color:var(--text); }
   button:hover { filter:brightness(1.06); }
   button:disabled { opacity:.5; cursor:default; filter:none; }
+  .hiddenrow { display:flex; align-items:center; gap:8px; margin-top:10px;
+               font-size:13px; color:var(--secondary); }
+  .hiddenrow[hidden] { display:none; }
+  button.linkbtn { background:none; padding:0; color:var(--primary);
+                   font-size:13px; font-weight:500; }
+  button.linkbtn:hover { text-decoration:underline; filter:none; }
   .link { margin-top:18px; padding-top:16px; border-top:1px solid var(--divider); }
   .link label { display:block; font-size:.86rem; font-weight:500; margin-bottom:2px; }
   .link .hint { color:var(--secondary); font-size:.78rem; margin-bottom:9px; }
@@ -117,6 +125,12 @@ CONTROL_HTML = b"""<!doctype html><html><head><meta charset="utf-8">
     <div class="actions">
       <button class="primary" id="go">Show next</button>
       <button class="ghost" id="repush">Re-push to TV</button>
+      <button class="ghost" id="hide" title="Hide this piece and show another">
+        Never show this</button>
+    </div>
+    <div class="hiddenrow" id="hiddenrow" hidden>
+      <span id="hiddentext"></span>
+      <button class="linkbtn" id="unhide">Un-hide all</button>
     </div>
     <div class="link">
       <label for="url">Show a specific piece</label>
@@ -218,6 +232,12 @@ CONTROL_HTML = b"""<!doctype html><html><head><meta charset="utf-8">
 
     document.getElementById('go').disabled = !!s.busy;
     document.getElementById('repush').disabled = !!s.busy || !s.last_ts;
+    document.getElementById('hide').disabled = !!s.busy || !s.key;
+
+    var n = s.hidden_count || 0;
+    document.getElementById('hiddenrow').hidden = !n;
+    document.getElementById('hiddentext').textContent =
+      n + (n === 1 ? ' piece hidden' : ' pieces hidden');
 
     if(s.last_ts && s.last_ts !== lastTs){
       lastTs = s.last_ts;
@@ -243,6 +263,16 @@ CONTROL_HTML = b"""<!doctype html><html><head><meta charset="utf-8">
   }
   document.getElementById('go').onclick=function(){ post('next','go'); };
   document.getElementById('repush').onclick=function(){ post('repush','repush'); };
+  function act(url, btn){
+    var b=document.getElementById(btn); b.disabled=true; setMsg('', false);
+    fetch(url,{method:'POST'})
+      .then(function(r){ return r.json(); })
+      .then(function(d){ setMsg(d.message||'', !d.ok); })
+      .catch(function(){ setMsg('Could not reach the app', true); })
+      .then(function(){ setTimeout(refresh, 600); });
+  }
+  document.getElementById('hide').onclick=function(){ act('hide','hide'); };
+  document.getElementById('unhide').onclick=function(){ act('unhide','unhide'); };
   document.getElementById('linkform').onsubmit=function(ev){
     ev.preventDefault();
     var inp=document.getElementById('url'), btn=document.getElementById('show');
@@ -270,7 +300,7 @@ MAX_BODY = 4096          # a URL, not an upload endpoint
 def make_server(trigger: threading.Event, status: dict,
                 repush: threading.Event | None = None,
                 wake: threading.Event | None = None,
-                on_url=None,
+                on_url=None, on_hide=None, on_unhide=None,
                 host: str = "0.0.0.0", port: int = 8099):
     debug = status.get("_debug", False)
 
@@ -319,6 +349,14 @@ def make_server(trigger: threading.Event, status: dict,
                 _signal(repush)
                 log.info("manual 're-push' requested from control panel")
                 self._send(200, "application/json", b'{"queued":true}')
+            elif path in ("/hide", "/unhide"):
+                action = on_hide if path == "/hide" else on_unhide
+                if action is None:
+                    ok, message = False, "not available"
+                else:
+                    ok, message = action()
+                self._send(200 if ok else 400, "application/json",
+                           json.dumps({"ok": ok, "message": message}).encode())
             elif path == "/show":
                 url = self._body_field("url").strip()
                 if on_url is None:

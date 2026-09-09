@@ -7,7 +7,7 @@
 # daily (or on your own interval); no automation needed. Paste a reframed.gallery
 # link into the panel to show one specific piece now.
 name: REFRAMED Gallery
-version: "0.6.1"
+version: "0.7.0"
 slug: frame_gallery
 description: >-
   Curated public-domain art on your Samsung Frame TV from reframed.gallery -

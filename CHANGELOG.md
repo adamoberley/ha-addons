@@ -1,5 +1,15 @@
 # Changelog
 
+## REFRAMED Gallery 0.7.0 — 2026-09-09
+
+**"Never show this."** Curated doesn't mean *to your taste*, and until now the
+only way to get rid of one particular piece was to guess a keyword filter that
+excluded it. One press on the panel now retires the piece for good and picks a
+replacement immediately; the hidden list is kept in `/data` beside the no-repeat
+history, and the panel shows the count with an **Un-hide all** beside it. A new
+**Hide current art** button entity does the same from Home Assistant, for a
+dashboard tile or a voice assistant.
+
 ## Local Faces 0.6.1 — 2026-09-09
 
 **Notifications no longer hold up recognition.** The push was sent inline, so a
