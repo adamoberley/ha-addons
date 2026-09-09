@@ -8,6 +8,8 @@ host), and subscribes to the command topics so HA can drive the app:
   - select.reframed_gallery_matte        - switch the TV-rendered matte live
   - text.reframed_gallery_show_link      - set a reframed.gallery artwork URL to
                                            put that exact piece on the TV
+  - button.reframed_gallery_hide         - press to hide the piece that's showing
+                                           for good and put another one up
 
 If MQTT is unavailable the app still runs (the panel + interval are unaffected).
 """
@@ -32,6 +34,7 @@ MATTE_STATE = f"{NODE}/matte/state"
 MATTE_CMD = f"{NODE}/matte/set"
 LINK_STATE = f"{NODE}/link/state"
 LINK_CMD = f"{NODE}/link/set"
+HIDE_CMD = f"{NODE}/hide/press"
 
 # Offered in the HA "Collection" select. "seasonal" auto-tracks the date;
 # "weather" tracks the configured HA weather entity; "all" is the whole
@@ -66,12 +69,14 @@ def _device() -> dict:
 
 
 class MqttCtl:
-    def __init__(self, opts, on_next, on_collection, on_matte=None, on_url=None) -> None:
+    def __init__(self, opts, on_next, on_collection, on_matte=None, on_url=None,
+                 on_hide=None) -> None:
         self.opts = opts
         self.on_next = on_next                 # callable() -> show next now
         self.on_collection = on_collection     # callable(slug) -> switch collection
         self.on_matte = on_matte               # callable(matte_id) -> switch TV matte
         self.on_url = on_url                   # callable(url) -> (accepted, message)
+        self.on_hide = on_hide                 # callable() -> (hidden, message)
         self.client = None
         self.current_collection = (getattr(opts, "collection", "") or "seasonal")
         self.current_matte = (getattr(opts, "tv_matte", "") or "none")
@@ -149,10 +154,18 @@ class MqttCtl:
             "state_topic": LINK_STATE, "max": 255, "mode": "text",
             "availability_topic": AVAIL, "icon": "mdi:link-variant",
             "device": _device()}), retain=True)
+        # Hide-and-replace as a button, so a dashboard tile (or an automation)
+        # can retire a piece without opening the panel.
+        client.publish(f"homeassistant/button/{NODE}/hide/config", json.dumps({
+            "name": "Hide current art", "object_id": f"{NODE}_hide",
+            "unique_id": f"{NODE}_hide", "command_topic": HIDE_CMD,
+            "availability_topic": AVAIL, "icon": "mdi:eye-off",
+            "device": _device()}), retain=True)
         client.publish(AVAIL, "online", retain=True)
         client.publish(SEL_STATE, self.current_collection, retain=True)
         client.publish(MATTE_STATE, self.current_matte, retain=True)
-        client.subscribe([(NEXT_CMD, 0), (SEL_CMD, 0), (MATTE_CMD, 0), (LINK_CMD, 0)])
+        client.subscribe([(NEXT_CMD, 0), (SEL_CMD, 0), (MATTE_CMD, 0), (LINK_CMD, 0),
+                          (HIDE_CMD, 0)])
         log.info("MQTT connected; REFRAMED Gallery entities announced")
 
     def _on_message(self, _client, _userdata, msg) -> None:
@@ -163,6 +176,9 @@ class MqttCtl:
         if msg.topic == NEXT_CMD:
             log.info("HA pressed Next")
             self.on_next()
+        elif msg.topic == HIDE_CMD:
+            _, message = self.on_hide() if self.on_hide else (False, "unavailable")
+            log.info("HA pressed Hide: %s", message)
         elif msg.topic == SEL_CMD and payload:
             log.info("HA set collection -> %s", payload)
             self.current_collection = payload

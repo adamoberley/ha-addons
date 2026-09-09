@@ -107,6 +107,33 @@ actions:
       value: https://www.reframed.gallery/robert-kelsey/the-golf-links-north-berwick
 ```
 
+## Retiring a piece you don't want
+
+Curated doesn't mean *to your taste*. When something goes up that you'd rather
+not look at for the rest of the day, press **Never show this** on the panel: the
+piece is added to a hidden list and a replacement is picked immediately, so the
+wall is fixed in one click. Nothing else changes — the collection, the schedule
+and the keyword filters stay as they are.
+
+- The list is **permanent and local**, kept in the app's `/data` alongside the
+  no-repeat history, so it survives restarts and updates.
+- The panel shows how many pieces are hidden, with **Un-hide all** next to it if
+  you want them back (the pieces themselves are never deleted anywhere — the
+  gallery just stops offering them).
+- There's a **Hide current art** button entity for the same thing from Home
+  Assistant, so a dashboard tile or a voice assistant can retire a piece:
+
+```yaml
+actions:
+  - action: button.press
+    target:
+      entity_id: button.reframed_gallery_hide
+```
+
+- Hiding is per *artwork*, not per artist or subject. To rule out a whole theme,
+  use `exclude_keywords` (which matches title, artist and collection words) or
+  pick a narrower `collection`.
+
 ## Keeping past days on the TV
 
 By default the app replaces its upload in place, so the Frame's art library holds
@@ -129,6 +156,8 @@ exposes these over MQTT discovery:
 - **Matte** select — switch the TV-rendered matte live.
 - **Show link** text — set a reframed.gallery artwork URL to put that exact piece
   on the TV now.
+- **Hide current art** button — retire the piece that's showing (it never comes
+  back) and put a fresh one up.
 
 ## TV-rendered mattes
 
