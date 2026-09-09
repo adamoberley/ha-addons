@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.7.2 — 2026-09-08
+
+- **Fixed: Sendspin audio could not connect at all** — every attempt failed with
+  `SendspinClient.__init__() got an unexpected keyword argument 'client_id'`, so
+  the lights never heard Music Assistant
+  ([#11](https://github.com/adamoberley/ha-addons/issues/11)). The cause was a
+  dependency that moved underneath us: `aiosendspin` 7.0 replaced the client's
+  `client_id` with an X25519 identity plus a pairing store (the new Noise
+  handshake), and LedFX still asks for a bare `aiosendspin>=4.0.0` — so any image
+  built after 7.0 shipped got an incompatible library. The app now pins
+  `aiosendspin==6.1.1`, the last release with the API this engine calls, matching
+  the range upstream LedFX itself now caps to. Music Assistant still accepts these
+  clients (its Sendspin provider keeps "allow legacy clients" on by default).
+- The build now **verifies** the Sendspin client API instead of trusting it: if a
+  future dependency bump drops `client_id`, the image fails to build with a clear
+  message rather than installing an app whose audio can never connect.
+
 ## 1.7.1 — 2026-06-25
 
 - **Tidied the bottom nav.** Now that Home opens on your devices, the separate

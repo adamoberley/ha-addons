@@ -27,6 +27,12 @@ for 20s → reconnect" churn), plus **Sendspin now-playing metadata**. The **web
 is the official LedFX frontend (the HASS-optimised build, which uses relative paths
 so it works under ingress); we patch only how it discovers its backend.
 
+The **Sendspin client library** (`aiosendspin`) is pinned to the last release that
+speaks the API this engine calls — 7.0 changed the client handshake, and LedFX
+hasn't moved yet. Music Assistant still accepts these clients; if its Sendspin
+settings ever get **"allow legacy clients"** switched off, this app needs an engine
+bump before it can connect again.
+
 ## Requirements
 
 - **Home Assistant OS or Supervised** (where apps run).
@@ -130,6 +136,10 @@ If your Mosquitto only exposes the TLS listener (8883), enable the plaintext
   from HA.
 - **Sendspin server not discovered** — add it manually:
   `ws://<your-ha-ip>:8927/sendspin`.
+- **`SendspinClient.__init__() got an unexpected keyword argument 'client_id'`** in
+  the log, retrying forever — an old build picked up an incompatible Sendspin
+  library. Fixed in **1.7.2**: update the app, then **Rebuild** it (Apps → LedFX →
+  ⋮ → Rebuild) so the image is rebuilt with the pinned library.
 - **Effects stutter / high CPU** — lower the effect's FPS or the device pixel
   count; real-time audio effects are CPU-bound.
 - Set **Log level → debug** and check the app **Log** tab for details.

@@ -20,11 +20,20 @@ of silently regressing.
    from the Python class attribute NAME in ledfx/effects/*.py, not the frontend.
    Renaming NAME is display-only (scenes/presets reference the effect *type*, not
    the name), so this is safe.
+
+It also *verifies* (patches nothing) that the resolved aiosendspin still speaks
+the API this ledfx build calls: aiosendspin 7.0 replaced the client's `client_id`
+with a Noise identity + pairing store, so a drifting pin would produce an app
+whose Sendspin audio can never connect (github issue #11). requirements.txt pins
+the compatible release; this fails the build if that ever stops holding.
 """
 from __future__ import annotations
 
 import glob
+import importlib.metadata
+import inspect
 import os
+import sys
 
 import ledfx
 
@@ -80,6 +89,36 @@ def patch_effect_names() -> None:
         print("[patch-backend] note: no 'NAME = \"Blade ' effect names found (may already be patched)")
 
 
+def check_sendspin_client() -> None:
+    """Fail the build if aiosendspin no longer takes ledfx's `client_id` argument.
+
+    ledfx (and upstream main) construct SendspinClient(client_id=..., ...); 7.0
+    swapped that for an X25519 identity + pairing store. Catching it here beats
+    shipping an app that only reveals the mismatch as a per-reconnect TypeError.
+    """
+    try:
+        from aiosendspin.client import SendspinClient
+    except ImportError as exc:
+        print(f"[patch-backend] WARNING: aiosendspin not importable ({exc})"
+              " - Sendspin audio unavailable")
+        return
+
+    try:
+        version = importlib.metadata.version("aiosendspin")
+    except importlib.metadata.PackageNotFoundError:
+        version = "unknown"
+
+    if "client_id" not in inspect.signature(SendspinClient.__init__).parameters:
+        sys.exit(
+            f"[patch-backend] FATAL: aiosendspin {version} dropped SendspinClient(client_id=...), "
+            "which this ledfx build calls - Sendspin audio could never connect. "
+            "Pin aiosendspin <7.0 in requirements.txt, or bump the ledfx SHA to a "
+            "commit that uses the identity/pairing-store API."
+        )
+    print(f"[patch-backend] aiosendspin {version}: SendspinClient(client_id=...) accepted")
+
+
 if __name__ == "__main__":
     patch_audio_delay()
     patch_effect_names()
+    check_sendspin_client()
