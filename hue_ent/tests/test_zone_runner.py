@@ -59,10 +59,11 @@ def make_runner(idle_timeout_s: float = 0.15, lights=("L1", "L2")):
 class FakeDdp:
     """Stands in for the DDP listener: one latest frame and a receive stamp."""
 
-    def __init__(self, latest=None, last_rx: float = 0.0):
+    def __init__(self, latest=None, last_rx: float = 0.0, rx_fps: float = 0.0):
         self.latest = latest
         self.last_rx = last_rx
         self.frames_rx = 0 if latest is None else 1
+        self.rx_fps = rx_fps
 
 
 async def run_ticker(runner, bridge, timeout: float = 3.0) -> None:

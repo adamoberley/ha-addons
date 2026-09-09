@@ -39,6 +39,9 @@ Then open the **sidebar panel** to fine-tune the parts only you can know:
   the stream).
 - **Enabled** — untick rooms you never want to stream.
 - **Test stream** — arms the zone right there so you can check it end to end.
+- **Live numbers** — each card reports what the zone is actually doing: the DDP
+  frames arriving from LedFX, the Zigbee frames going out, and each bulb's
+  **signal**. See below.
 
 Changes save to the app's data folder, apply instantly (no restart), and update
 the matching LedFX device. **Rescan rooms** picks up newly paired bulbs or area
@@ -114,6 +117,28 @@ bulbs — they won't get stranded mid-effect.
 Automation ideas: turn the switch on when your media player starts and off when
 it stops, or expose it on a dashboard next to your LedFX panel.
 
+## Reading the numbers
+
+Every zone card carries one line of live state, which is usually the whole
+diagnosis:
+
+| The line says | It means |
+| --- | --- |
+| `in 43.9 fps · out 24.6 fps · 19,122 frames received` | Working. LedFX is streaming and the bulbs are being driven at the target rate. |
+| `no DDP yet on :4049 — point a LedFX device here` | Nothing has *ever* arrived on this zone's port. Its LedFX device is missing, disabled, or aimed at the wrong port/host. |
+| `idle — last frame 74s ago` | LedFX streamed earlier and stopped (effect off, or nothing playing). Normal. |
+| `armed for 12s, no DDP` | The zone is armed but nothing is arriving; it releases the bulbs after `idle_timeout_s`. |
+
+Each bulb also shows its **signal** — the Zigbee link quality zigbee2mqtt last
+reported, with a ★ on the strongest in the room. Use it as a *starting point*
+when picking the proxy: link quality is measured to the coordinator rather than
+between bulbs, so the strongest bulb is usually well-placed, but the proxy's real
+job is reaching the *other* bulbs in the room. If a zone stutters, try the ★ bulb
+as proxy, then a more central one.
+
+Numbers update every few seconds, and a card you're editing is never
+re-rendered mid-edit — unsaved changes survive the refresh.
+
 ## Troubleshooting
 
 - **No rooms in the panel.** The panel says which of these it is:
@@ -130,6 +155,12 @@ it stops, or expose it on a dashboard next to your LedFX panel.
 - **Only some rooms appear.** Discovery skips device registry entries it cannot
   read and logs them (`skipped N unreadable device registry entr(ies)`) — if one
   of your Hue bulbs is in that list, please open an issue with the log line.
+- **Nothing moves.** Check the zone's live line (above). `no DDP yet` is a LedFX
+  problem (wrong device/port), while `in … fps` with no `out … fps` is a Zigbee
+  one — look at the proxy bulb and its signal.
+- **It stutters.** Lower **Target fps** to 20, and try the ★ (strongest signal)
+  bulb as the proxy. A proxy that can't reach the rest of the room drops frames
+  for the whole zone.
 
 ## How it works / limits
 

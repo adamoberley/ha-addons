@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.0 — 2026-09-09
+
+- **The panel now shows what's actually happening.** Each zone card reports the
+  DDP frames arriving from LedFX, the Zigbee frames going out, and how long since
+  the last frame — the three numbers every "nothing moves" or "it stutters"
+  question needs, and none of which were visible before. A zone nothing has ever
+  streamed to says so by name: *no DDP yet on :4049 — point a LedFX device here*.
+- **Per-bulb signal, with the strongest starred.** Each light shows the Zigbee
+  link quality zigbee2mqtt last reported, so picking a proxy isn't guesswork.
+  (It's measured to the coordinator, so it's a starting point rather than a
+  verdict — the proxy's real job is reaching the other bulbs.)
+- Live values are patched into the page in place, so a card you're editing keeps
+  its unsaved changes while the numbers keep updating.
+
 ## 0.3.2 — 2026-09-09
 
 - **Fixed: a zone armed with nothing streaming never let go.** Arming from the
