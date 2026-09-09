@@ -74,7 +74,9 @@ LedFX through its API — named **Hue \<zone\>**, with the right port, pixel
 count, and frame rate — so there is nothing to mirror by hand. Just open LedFX
 and put an effect on the zone's device. With `auto_start` on, the zone arms as
 soon as frames flow and releases the lights after `idle_timeout_s` (default
-30 s) once they stop.
+30 s) once they stop. The same timeout applies to a zone armed by hand — the HA
+switch or the panel's **Test stream** — so one turned on with nothing streaming
+releases the bulbs (and its pause entities) instead of holding them.
 
 Details and knobs:
 

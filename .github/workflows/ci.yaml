@@ -1,0 +1,65 @@
+# Lint + tests for every app in the repo.
+#
+# These apps are built by each user's own Supervisor at install time, so there
+# is no build artifact to test here - what CI can do is catch the two things
+# that actually broke releases: Python that doesn't lint/parse, and manifests,
+# READMEs and changelogs drifting out of agreement (tests/test_repo_consistency.py).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: ruff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/ruff-action@v3
+        with:
+          args: check --output-format=github
+
+  test:
+    name: pytest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test dependencies
+        # The apps' own runtime deps that the tests import, plus the test tools.
+        # Kept explicit (not requirements.txt) so CI never compiles ledfx.
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest pytest-asyncio pyyaml aiohttp aiomqtt requests \
+            numpy "opencv-python-headless>=4.9,<6"
+      - name: Run tests
+        run: python -m pytest
+
+  manifests:
+    name: app manifests parse
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check every config.yaml / build.yaml / translation is valid YAML
+        run: |
+          python - <<'PY'
+          import pathlib, sys, yaml
+          bad = []
+          for path in sorted(pathlib.Path().glob("*/*.yaml")) + \
+                      sorted(pathlib.Path().glob("*/translations/*.yaml")) + \
+                      [pathlib.Path("repository.yaml")]:
+              try:
+                  yaml.safe_load(path.read_text())
+              except yaml.YAMLError as exc:
+                  bad.append(f"{path}: {exc}")
+          print("\n".join(bad) or "all manifests parse")
+          sys.exit(1 if bad else 0)
+          PY

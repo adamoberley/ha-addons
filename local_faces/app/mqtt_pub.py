@@ -35,6 +35,18 @@ def _disco_topic(slug: str) -> str:
     return f"homeassistant/sensor/{NODE}/{slug}/config"
 
 
+def _new_client(mqtt):
+    """A paho client that works on both 1.x and 2.x.
+
+    paho-mqtt 2.0 made the callback API version explicit and refuses to build a
+    client without one; asking for VERSION1 keeps the callback signatures below
+    valid on either major, so the pin can move without a rewrite.
+    """
+    if hasattr(mqtt, "CallbackAPIVersion"):      # paho-mqtt >= 2.0
+        return mqtt.Client(mqtt.CallbackAPIVersion.VERSION1)
+    return mqtt.Client()
+
+
 def _device() -> dict:
     return {"identifiers": [NODE], "name": "Local Faces",
             "manufacturer": "Local Faces (open source)", "model": "YuNet + SFace"}
@@ -74,7 +86,7 @@ class MqttPublisher:
             return
         import paho.mqtt.client as mqtt
 
-        self.client = mqtt.Client()
+        self.client = _new_client(mqtt)
         if user:
             self.client.username_pw_set(user, password)
         self.client.will_set(AVAIL_TOPIC, "offline", retain=True)

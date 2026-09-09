@@ -48,6 +48,18 @@ MATTE_OPTIONS = ["none", "modern_polar", "modern_apricot", "modern_black",
                  "shadowbox_polar", "shadowbox_black", "flexible_polar"]
 
 
+def _new_client(mqtt):
+    """A paho client that works on both 1.x and 2.x.
+
+    paho-mqtt 2.0 made the callback API version explicit and refuses to build a
+    client without one; asking for VERSION1 keeps the callback signatures below
+    valid on either major, so the pin can move without a rewrite.
+    """
+    if hasattr(mqtt, "CallbackAPIVersion"):      # paho-mqtt >= 2.0
+        return mqtt.Client(mqtt.CallbackAPIVersion.VERSION1)
+    return mqtt.Client()
+
+
 def _device() -> dict:
     return {"identifiers": [NODE], "name": "REFRAMED Gallery",
             "manufacturer": "REFRAMED Gallery (open source)", "model": "reframed.gallery"}
@@ -91,7 +103,7 @@ class MqttCtl:
             return
         import paho.mqtt.client as mqtt
 
-        self.client = mqtt.Client()
+        self.client = _new_client(mqtt)
         if user:
             self.client.username_pw_set(user, pw)
         self.client.will_set(AVAIL, "offline", retain=True)

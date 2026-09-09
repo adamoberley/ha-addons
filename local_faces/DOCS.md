@@ -85,7 +85,9 @@ model — `sface` is good at `0.363`; for `mobilefacenet_w600k` start lower (aro
   (`none` / `unknown` when nobody known is in view), with `score`, `faces`, and
   `timestamp` attributes. Automate freely: unlock for known people, alert on
   unknown, announce arrivals.
-- **Push notification** — optional ping via any HA notify service.
+- **Push notification** — optional ping via any HA notify service. Sent in the
+  background, so a slow notify service never holds up recognition (if one wedges,
+  alerts are dropped rather than cameras stalling).
 - **Sightings log** — name, confidence, and a snapshot thumbnail for every
   recognition, in the dashboard. Unknown faces can be named in place to enroll them,
   or ignored in place if they aren't people.

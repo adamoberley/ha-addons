@@ -270,7 +270,8 @@ PAGE = b"""<!doctype html>
     <div class="modal-meta" id="modalMeta"></div>
     <div class="field">
       <label class="lbl" for="modalName">Name this face</label>
-      <input type="text" id="modalName" list="names" placeholder="Type or pick a name" autocomplete="off">
+      <input type="text" id="modalName" list="names"
+             placeholder="Type or pick a name" autocomplete="off">
     </div>
     <div class="btns">
       <button class="btn-primary" id="modalSave">Save</button>
@@ -356,7 +357,9 @@ PAGE = b"""<!doctype html>
           +(c.ignored?" (+"+c.ignored+" ignored)":"");
         else t.who.textContent="no signal";
         t.who.className="cam-who"+(c.state==="known"?" known":(c.state==="unknown"?" unknown":""));
-        anyOk=anyOk||c.camera_ok; anyKnown=anyKnown||c.state==="known"; anyUnknown=anyUnknown||c.state==="unknown";
+        anyOk=anyOk||c.camera_ok;
+        anyKnown=anyKnown||c.state==="known";
+        anyUnknown=anyUnknown||c.state==="unknown";
       });
       var pill=el("pill");
       pill.className="pill"+(anyUnknown?" alert":(anyOk?" live":""));
@@ -400,7 +403,8 @@ PAGE = b"""<!doctype html>
         del.addEventListener("click", function(){
           if(!confirm("Remove "+p.name+"?")) return;
           api("person/delete?name="+encodeURIComponent(p.name), {method:"POST"})
-            .then(function(r){ setMsg(r.message, r.ok?"ok":"err"); refreshPeople(); refreshLog(); });
+            .then(function(r){ setMsg(r.message, r.ok?"ok":"err");
+                               refreshPeople(); refreshLog(); });
         });
         li.appendChild(del); ul.appendChild(li);
       });
@@ -495,7 +499,8 @@ PAGE = b"""<!doctype html>
         {method:"POST"}).then(function(r){
       if(r.ok){ setMsg(r.message,"ok"); closeModal(); refreshPeople(); refreshLog(); }
       else { setModalMsg(r.message||"Could not save.","err"); el("modalSave").disabled=false; }
-    }).catch(function(){ setModalMsg("Save failed. Try again.","err"); el("modalSave").disabled=false; });
+    }).catch(function(){ setModalMsg("Save failed. Try again.","err");
+                         el("modalSave").disabled=false; });
   }
   function ignoreSighting(){
     if(!modalEvent) return;
@@ -541,7 +546,8 @@ PAGE = b"""<!doctype html>
       el("pick").disabled=false;
       if(r.ok && r.token){ setMsg(r.message,"ok"); showReview(r.thumb, r.token); }
       else { setMsg(r.message,"err"); }
-    }).catch(function(){ el("pick").disabled=false; setMsg("Something went wrong. Try again.","err"); });
+    }).catch(function(){ el("pick").disabled=false;
+                         setMsg("Something went wrong. Try again.","err"); });
     this.value="";
   });
   el("save").addEventListener("click", function(){
@@ -566,7 +572,9 @@ PAGE = b"""<!doctype html>
       }).catch(function(){ busy(false); setMsg("Could not ignore that face.","err"); });
   });
   el("retake").addEventListener("click", function(){
-    if(pendingToken){ api("enroll/cancel?token="+encodeURIComponent(pendingToken), {method:"POST"}); }
+    if(pendingToken){
+      api("enroll/cancel?token="+encodeURIComponent(pendingToken), {method:"POST"});
+    }
     resetEnroll(); setMsg("");
   });
   function busy(on){

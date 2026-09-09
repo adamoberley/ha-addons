@@ -30,7 +30,8 @@ configuration:
       (defaults to the first light; must be in radio range of the others);
       fps (5-25, default 20); ddp_port = this zone's DDP UDP listen port
       (default 4048 + index); idle_timeout_s = auto-stop after this many
-      seconds without DDP (default 30); auto_start = arm when DDP arrives
+      seconds without DDP, counted from the arm if none ever arrives
+      (default 30); auto_start = arm when DDP arrives
       (default true); brightness_scale = global output dimmer (0.05-1.0);
       pause_entities = entities switched off while streaming (e.g. your
       Adaptive Lighting switch) and restored afterwards.

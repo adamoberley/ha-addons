@@ -3,5 +3,5 @@
 opencv-python-headless>=4.9,<5
 numpy>=1.24,<3
 onnxruntime>=1.16,<2      # only used for optional alternative ArcFace-style models
-paho-mqtt>=1.6,<2          # MQTT discovery for the "Recognized Name" sensor
+paho-mqtt>=1.6,<3          # MQTT discovery for the "Recognized Name" sensor
 requests>=2.31            # model download, snapshot polling, HA/MQTT service lookup
