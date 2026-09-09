@@ -51,6 +51,16 @@ def _state(bridge) -> dict:
         "auto_zones": bool(bridge.options.get("auto_zones", True)),
         "devices_seen": bridge.devices_seen.is_set(),
         "ledfx_url": str(bridge.options.get("ledfx_url", "http://127.0.0.1:8888") or ""),
+        # Why room discovery produced what it did - the panel shows this when no
+        # rooms come back, so a failure isn't log-only.
+        "discovery": {
+            "ok": bridge.discovery.ok,
+            "error": bridge.discovery.error,
+            "summary": bridge.discovery.summary,
+            "areas": bridge.discovery.areas,
+            "lights": bridge.discovery.lights,
+            "matched": bridge.discovery.matched,
+        },
     }
 
 

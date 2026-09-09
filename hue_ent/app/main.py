@@ -292,6 +292,7 @@ class Bridge:
         self.z2m_lights: dict[str, dict] = {}  # Philips lights: fn -> {ieee, color}
         self.light_states: dict[str, dict] = {}
         self.auto_rooms: list[dict] = []
+        self.discovery = registry.Discovery()  # last room-discovery result (for the GUI)
         self.room_views: list[dict] = []
         self.client: aiomqtt.Client | None = None
         self.stopping = False
@@ -366,7 +367,8 @@ class Bridge:
         )
 
     async def rescan_rooms(self) -> None:
-        self.auto_rooms = await registry.discover_rooms(self.z2m_lights, retries=1)
+        self.discovery = await registry.discover_rooms(self.z2m_lights, retries=1)
+        self.auto_rooms = self.discovery.rooms
         await self.rebuild_zones()
 
     # -- MQTT plumbing -----------------------------------------------------
@@ -585,12 +587,14 @@ async def _bootstrap(bridge: Bridge) -> None:
     """Once Z2M's device list is in: discover rooms, then build zones."""
     await bridge.devices_seen.wait()
     if bridge.options.get("auto_zones", True):
-        bridge.auto_rooms = await registry.discover_rooms(bridge.z2m_lights)
+        bridge.discovery = await registry.discover_rooms(bridge.z2m_lights)
+        bridge.auto_rooms = bridge.discovery.rooms
     await bridge.rebuild_zones()
     if not bridge.zones:
         LOG.warning(
-            "no zones active - enable rooms in the sidebar panel "
-            "or add manual zones in the app configuration"
+            "no zones active - %s Enable rooms in the sidebar panel, "
+            "or add manual zones in the app configuration.",
+            bridge.discovery.summary,
         )
 
 
