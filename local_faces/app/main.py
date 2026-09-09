@@ -32,6 +32,7 @@ from facedb import FaceDB
 from mqtt_pub import MqttPublisher
 from notify import Notifier
 from reclog import RecognitionLog
+from statics import StaticWatcher
 
 SERVER_PORT = 8099
 UNKNOWN_KEY = "__unknown__"
@@ -68,6 +69,7 @@ class App:
         }
         self.mqtt = MqttPublisher(opts, self.cameras) if opts.enable_mqtt else None
         self.notifier = Notifier(opts)
+        self.statics = StaticWatcher(opts.recognition_threshold, opts.recognition_model)
         self.httpd = None
 
         self.running = True
@@ -77,6 +79,8 @@ class App:
         self._cooldown: dict[tuple, float] = {}       # (slug, identity) -> ts
         self._last_pub: dict[str, str] = {}           # slug/__agg__ -> last published state
         self._pending: dict[str, dict] = {}           # enrollment token -> staged face
+        self._seen: dict[str, dict] = {}              # name -> {ts, camera, score, present}
+        self._person_slugs: dict[str, str] = {}       # name -> HA entity slug
         self._rr = 0                                  # round-robin cursor
 
     @staticmethod
@@ -91,6 +95,7 @@ class App:
             src.start()
         if self.mqtt:
             self.mqtt.start()
+            self._announce_people()
         self.httpd = server.make_server(self, port=SERVER_PORT)
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
         log.info("dashboard on :%d", SERVER_PORT)
@@ -106,6 +111,7 @@ class App:
 
     # ---- recognition loop (round-robin: one camera per tick) ---------------
     def tick(self) -> None:
+        self._expire_presence()      # runs even when nothing is detected
         if not self.cameras:
             return
         cam = self.cameras[self._rr % len(self.cameras)]
@@ -131,8 +137,15 @@ class App:
             if ignored:
                 continue            # a poster, a photo frame - matched, then dropped
             live.append((face, name, score))
-            if name and score > top_score:
-                top_name, top_score = name, score
+            if name:
+                self._mark_seen(name, cam, score)
+                if score > top_score:
+                    top_name, top_score = name, score
+            else:
+                # An unknown face that never moves is probably a picture; the
+                # watcher offers it up after it has sat there long enough.
+                self.statics.observe(cam.name, (face.x, face.y, face.w, face.h),
+                                     face.embedding, face.thumb)
             self._handle_event(cam, face, name, score)
 
         annotated = self.engine.annotate(frame, results)
@@ -194,6 +207,79 @@ class App:
                 self._last_pub["__agg__"] = stamp
                 self.mqtt.publish("recognized", state, attrs)
 
+    # ---- per-person presence ------------------------------------------------
+    def _announce_people(self) -> None:
+        """(Re)create the HA person entities after an enrollment change."""
+        if not self.mqtt or not self.opts.person_sensors:
+            return
+        self._person_slugs = self.mqtt.announce_people([p["name"] for p in self.db.people()])
+        for name, slug in self._person_slugs.items():
+            seen = self._seen.get(name)
+            self.mqtt.publish_person(slug, bool(seen and seen.get("present")),
+                                     self._presence_attrs(name))
+
+    def _presence_attrs(self, name: str) -> dict:
+        seen = self._seen.get(name) or {}
+        ts = seen.get("ts")
+        return {
+            "last_seen": (time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(ts)) if ts else None),
+            "camera": seen.get("camera") or None,
+            "score": seen.get("score"),
+        }
+
+    def _mark_seen(self, name: str, cam, score: float) -> None:
+        """Record a sighting and turn the person's presence entity on."""
+        seen = self._seen.setdefault(name, {})
+        was_present = bool(seen.get("present"))
+        seen.update(ts=time.time(), camera=cam.name, score=round(float(score), 3), present=True)
+        if not was_present:
+            log.info("%s present (%s)", name, cam.name)
+        slug = self._person_slugs.get(name)
+        if slug and self.mqtt and self.opts.person_sensors:
+            self.mqtt.publish_person(slug, True, self._presence_attrs(name))
+
+    def _expire_presence(self) -> None:
+        """Turn off anyone not seen within the presence timeout."""
+        timeout = self.opts.presence_timeout_seconds
+        now = time.time()
+        for name, seen in self._seen.items():
+            if seen.get("present") and now - seen.get("ts", 0) > timeout:
+                seen["present"] = False
+                log.info("%s away (not seen for %ds)", name, timeout)
+                slug = self._person_slugs.get(name)
+                if slug and self.mqtt and self.opts.person_sensors:
+                    self.mqtt.publish_person(slug, False, self._presence_attrs(name))
+
+    def people_view(self) -> list[dict]:
+        """Enrolled people for the dashboard, with when each was last seen."""
+        out = []
+        for person in self.db.people():
+            seen = self._seen.get(person["name"]) or {}
+            out.append({**person,
+                        "last_seen": seen.get("ts"),
+                        "last_camera": seen.get("camera") or "",
+                        "present": bool(seen.get("present"))})
+        return out
+
+    # ---- static-face suggestions -------------------------------------------
+    def suggestions(self) -> list[dict]:
+        return self.statics.suggestions()
+
+    def ignore_suggestion(self, candidate_id: str, label: str = "") -> dict:
+        """Accept a "that isn't a person" suggestion: ignore it for good."""
+        cand = self.statics.get(candidate_id)
+        if cand is None:
+            return {"ok": False, "message": "That suggestion is no longer current."}
+        result = self._ignore(cand.embedding, cand.thumb, label)
+        if result.get("ok"):
+            self.statics.drop(candidate_id)
+        return result
+
+    def dismiss_suggestion(self, candidate_id: str) -> dict:
+        if not self.statics.dismiss(candidate_id):
+            return {"ok": False, "message": "That suggestion is no longer current."}
+        return {"ok": True, "message": "Kept. We won't suggest that face again."}
+
     # ---- dashboard actions -------------------------------------------------
     def preview_jpeg(self, slug: str) -> bytes | None:
         with self._lock:
@@ -204,6 +290,7 @@ class App:
             "cameras": [dict(self._status[c.slug]) for c in self.cameras],
             "people": len(self.db.people()),
             "ignored": len(self.db.ignored_faces()),
+            "suggestions": len(self.statics.suggestions()),
             "mqtt": bool(self.mqtt),
             "model": self.opts.recognition_model,
             "mode": self.opts.mode,
@@ -246,6 +333,7 @@ class App:
         if not pending:
             return {"ok": False, "message": "That capture expired. Capture the face again."}
         samples = self.db.add(name, pending["emb"], pending["thumb"])
+        self._announce_people()
         word = "sample" if samples == 1 else "samples"
         return {"ok": True, "message": f"Saved {name} ({samples} {word})."}
 
@@ -272,12 +360,18 @@ class App:
         thumb = base64.b64decode(event["thumb"]) if event.get("thumb") else b""
         samples = self.db.add(name, emb, thumb)
         self.reclog.relabel(sighting_id, name)
+        self._announce_people()
         word = "sample" if samples == 1 else "samples"
         return {"ok": True, "message": f"Saved {name} ({samples} {word})."}
 
     def delete_person(self, name: str) -> dict:
         name = (name or "").strip()
         if self.db.delete(name):
+            slug = self._person_slugs.get(name)
+            self._seen.pop(name, None)
+            self._announce_people()
+            if slug and self.mqtt:
+                self.mqtt.clear_person(slug)   # take the entity out of HA too
             return {"ok": True, "message": f"Removed {name}."}
         return {"ok": False, "message": f"{name} not found."}
 
@@ -289,6 +383,15 @@ class App:
             return {"ok": False,
                     "message": f"{label} is an enrolled person. Use a different label, "
                                "or remove them first."}
+        # A photo of an enrolled person can't be ignored safely: its embedding
+        # *is* that person's, so the ignored pattern would swallow the real
+        # person too. Refuse instead of silently blinding a camera to them.
+        match, score = self.db.match(emb)
+        if match and not self.db.is_ignored(match):
+            return {"ok": False,
+                    "message": f"That face matches {match} ({score:.0%}), who is enrolled. "
+                               "Ignoring it would stop them being recognized, so it's "
+                               f"refused - remove {match} first if this really isn't them."}
         samples = self.db.add(label, emb, thumb, ignored=True)
         vecs = self.db.embeddings_for(label)
         purged = 0

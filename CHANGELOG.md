@@ -1,5 +1,23 @@
 # Changelog
 
+## Local Faces 0.7.0 — 2026-09-09
+
+**A presence sensor for every person, and the app finds the posters for you.**
+
+- `binary_sensor.local_faces_<name>` is on while that person has been seen
+  recently (`last_seen`, `camera`, `score` attributes), so "when Alex gets home"
+  is a plain state trigger. Entities appear as you enroll and are deleted from
+  Home Assistant when you remove someone — no restart either way. New options:
+  **One sensor per person** and **Presence timeout**.
+- **"Probably not a person"** — a face that keeps appearing in the same spot with
+  the same embedding for half an hour or more is a picture, not an arrival. The
+  dashboard offers it up with its thumbnail and how long it's been sitting there:
+  one click ignores it (and clears its past sightings), one click keeps it for
+  good. You no longer have to notice the problem first.
+- Ignoring a face that matches an **enrolled person** is now refused, and such
+  faces are never suggested — the embeddings are the same face, so it would have
+  stopped the real person being recognized.
+
 ## REFRAMED Gallery 0.7.0 — 2026-09-09
 
 **"Never show this."** Curated doesn't mean *to your taste*, and until now the
@@ -9,6 +27,7 @@ replacement immediately; the hidden list is kept in `/data` beside the no-repeat
 history, and the panel shows the count with an **Un-hide all** beside it. A new
 **Hide current art** button entity does the same from Home Assistant, for a
 dashboard tile or a voice assistant.
+
 
 ## Local Faces 0.6.1 — 2026-09-09
 

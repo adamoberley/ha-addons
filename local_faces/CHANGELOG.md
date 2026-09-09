@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.7.0 — 2026-09-09
+
+- **A presence sensor for every person.** `binary_sensor.local_faces_<name>` is
+  on while that person has been seen recently, with `last_seen`, `camera` and
+  `score` attributes — so "when Alex gets home" is a state trigger instead of a
+  template over a name string. Entities appear as you enroll and are removed
+  from Home Assistant when you delete someone, with no restart either way. New
+  options: **One sensor per person** (on) and **Presence timeout** (120 s).
+- **"Probably not a person."** The app now finds the posters, photo frames and
+  paused TVs itself: a face that keeps appearing in the *same spot* with the
+  *same* embedding for half an hour or more gets a dashboard card with its
+  thumbnail, the camera, and how long it's been sitting there. **Ignore** adds it
+  to the ignore list and clears its past sightings; **It's a person** keeps it and
+  is remembered across restarts. It only suggests — nothing is ignored without
+  your click.
+- **A face that matches an enrolled person can no longer be ignored.** Their
+  embeddings are the same face, so ignoring a photo of someone would have stopped
+  the real person being recognized. Such faces are never suggested, and doing it
+  by hand is refused with an explanation.
+- The dashboard's **Known people** list now shows who's here and when each person
+  was last seen, and each camera's sensor gained an `ignored_faces` attribute.
+
 ## 0.6.1 — 2026-09-09
 
 - **Notifications no longer hold up recognition.** The push was sent inline, so

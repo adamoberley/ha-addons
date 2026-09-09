@@ -42,6 +42,8 @@ class Options:
     cooldown_seconds: int
     notify_service: str
     notify_unknown: bool
+    person_sensors: bool
+    presence_timeout_seconds: int
     enable_mqtt: bool
     mqtt_host: str
     mqtt_port: int
@@ -105,6 +107,8 @@ def load() -> Options:
         cooldown_seconds=int(raw.get("cooldown_seconds", 15)),
         notify_service=str(raw.get("notify_service", "")).strip(),
         notify_unknown=bool(raw.get("notify_unknown", True)),
+        person_sensors=bool(raw.get("person_sensors", True)),
+        presence_timeout_seconds=int(raw.get("presence_timeout_seconds", 120)),
         enable_mqtt=bool(raw.get("enable_mqtt", True)),
         mqtt_host=str(raw.get("mqtt_host", "")).strip(),
         mqtt_port=int(raw.get("mqtt_port", 1883)),
