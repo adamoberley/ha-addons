@@ -74,6 +74,10 @@ model — `sface` is good at `0.363`; for `mobilefacenet_w600k` start lower (aro
      and recognized from then on. No re-capture needed.
 5. Recognized faces now appear under **Recent sightings** and on the
    `sensor.recognized_name` entity.
+6. **Ignore the faces that aren't people.** If a poster, a photo frame, a TV, or
+   an arcade cabinet's artwork keeps showing up as an unknown sighting, open that
+   sighting and hit **Ignore** (optionally labelling it, e.g. *Arcade cabinet*).
+   See below.
 
 ## What you get
 
@@ -83,7 +87,46 @@ model — `sface` is good at `0.363`; for `mobilefacenet_w600k` start lower (aro
   unknown, announce arrivals.
 - **Push notification** — optional ping via any HA notify service.
 - **Sightings log** — name, confidence, and a snapshot thumbnail for every
-  recognition, in the dashboard. Unknown faces can be named in place to enroll them.
+  recognition, in the dashboard. Unknown faces can be named in place to enroll them,
+  or ignored in place if they aren't people.
+- **Ignored faces** — a second list next to *Known people*, for faces that are
+  real faces but not arrivals.
+
+## Ignoring faces that aren't people
+
+A camera pointed at a room often sees faces that never move: the people printed
+on a poster, a photo in a frame, a paused TV, the artwork on an arcade cabinet.
+The detector is right to find them — they *are* faces — so the fix isn't to
+detect less, it's to recognize them and then drop them.
+
+Open the sighting (or **Capture** the face deliberately) and hit **Ignore**.
+From then on that face is:
+
+- kept out of **Recent sightings**,
+- never published to the sensors — it doesn't count as a face, and it can't put
+  a camera into the `unknown` state,
+- never notified,
+- drawn in the live view as a grey box labelled *ignored*, so you can see it's
+  being matched on purpose.
+
+Ignoring also **clears that face's existing sightings** out of the log, so the
+history you were trying to clean up goes with it.
+
+Notes:
+
+- The list holds **as many entries as you like**, and each entry can hold
+  several patterns — hit *Ignore* on the same object from a different angle and
+  it's added to that label rather than replacing it. More patterns = more
+  reliable skipping.
+- Labels are cosmetic; the matching is the same cosine test as recognition, at
+  the same **Match threshold**. If an ignored face is *sometimes* still logged,
+  add another pattern of it (or lower the threshold slightly).
+- A name that already belongs to an enrolled person is refused, so you can't
+  accidentally ignore a member of the household.
+- **Stop ignoring** in the *Ignored faces* card removes an entry; past sightings
+  are not restored (they're gone from the log).
+- Entries are stored per recognition model, like enrollments, in
+  `/data/faces.json`. Nothing leaves the box.
 
 ## Tuning
 
@@ -94,6 +137,7 @@ model — `sface` is good at `0.363`; for `mobilefacenet_w600k` start lower (aro
 | High CPU on a Pi | Set **Speed vs accuracy** to `fast`, raise **Detection interval** |
 | Distant false detections | Raise **Minimum face size** |
 | Notified too often | Raise **Re-trigger cooldown** |
+| A poster / TV / photo keeps being logged | **Ignore** that sighting (see above) |
 
 ## Notes & limits
 

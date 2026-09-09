@@ -9,6 +9,13 @@ Matching is the max cosine similarity over a person's samples (vectors are
 L2-normalized, so the dot product is the cosine); the best person wins if it
 clears the threshold, else the face is "unknown". Everything stays on disk in
 /data/faces.json - it never leaves the box.
+
+An entry can also be marked *ignored* instead of naming a person: the faces in a
+poster, a photo frame, or an arcade cabinet's artwork are real faces, and the
+detector is right to find them, but they aren't people arriving. Ignored entries
+match exactly like enrolled ones and are then dropped - out of the sightings log,
+the sensors, and the notifications. They live in the same per-model namespace
+(one flag on the entry), so switching models keeps them separate too.
 """
 from __future__ import annotations
 
@@ -33,6 +40,7 @@ class FaceDB:
         self._all: dict = {"version": 2, "models": {}}
         self._emb: dict[str, np.ndarray] = {}   # name -> (k, dim) normalized
         self._thumb: dict[str, str] = {}         # name -> base64 jpeg
+        self._ignored: set[str] = set()          # names matched, then deliberately dropped
         self._load()
 
     def _load(self) -> None:
@@ -56,13 +64,20 @@ class FaceDB:
             if vecs.size:
                 self._emb[name] = vecs.reshape(-1, vecs.shape[-1])
                 self._thumb[name] = person.get("thumb", "")
-        log.info("loaded %d enrolled %s for model '%s'", len(self._emb),
-                 "person" if len(self._emb) == 1 else "people", self.model_id)
+                if person.get("ignored"):
+                    self._ignored.add(name)
+        enrolled = len(self._emb) - len(self._ignored)
+        log.info("loaded %d enrolled %s (+%d ignored) for model '%s'", enrolled,
+                 "person" if enrolled == 1 else "people", len(self._ignored), self.model_id)
 
     def _save(self) -> None:
         self._all.setdefault("models", {})[self.model_id] = {
             "people": {
-                name: {"embeddings": self._emb[name].tolist(), "thumb": self._thumb.get(name, "")}
+                name: {
+                    "embeddings": self._emb[name].tolist(),
+                    "thumb": self._thumb.get(name, ""),
+                    **({"ignored": True} if name in self._ignored else {}),
+                }
                 for name in self._emb
             }
         }
@@ -74,13 +89,20 @@ class FaceDB:
         except OSError as exc:
             log.warning("could not persist faces: %s", exc)
 
-    def add(self, name: str, embedding: np.ndarray, thumb: bytes) -> int:
+    def add(self, name: str, embedding: np.ndarray, thumb: bytes,
+            ignored: bool = False) -> int:
+        """Add a sample to ``name``, creating it as a person or an ignored face.
+
+        An existing name keeps whichever bucket it is already in - see kind().
+        """
         vec = embedding.reshape(1, -1).astype("float32")
         with self._lock:
             if name in self._emb:
                 self._emb[name] = np.vstack([self._emb[name], vec])
             else:
                 self._emb[name] = vec
+                if ignored:
+                    self._ignored.add(name)
             if thumb:
                 self._thumb[name] = base64.b64encode(thumb).decode("ascii")
             samples = int(self._emb[name].shape[0])
@@ -91,16 +113,43 @@ class FaceDB:
         with self._lock:
             existed = self._emb.pop(name, None) is not None
             self._thumb.pop(name, None)
+            self._ignored.discard(name)
             if existed:
                 self._save()
         return existed
 
+    def kind(self, name: str) -> str | None:
+        """"person", "ignored", or None if the name is unused."""
+        with self._lock:
+            if name not in self._emb:
+                return None
+            return "ignored" if name in self._ignored else "person"
+
+    def is_ignored(self, name: str | None) -> bool:
+        if not name:
+            return False
+        with self._lock:
+            return name in self._ignored
+
+    def embeddings_for(self, name: str) -> np.ndarray | None:
+        with self._lock:
+            vecs = self._emb.get(name)
+            return None if vecs is None else vecs.copy()
+
     def people(self) -> list[dict]:
+        return self._listing(ignored=False)
+
+    def ignored_faces(self) -> list[dict]:
+        """The "not a person" entries, same shape as people()."""
+        return self._listing(ignored=True)
+
+    def _listing(self, ignored: bool) -> list[dict]:
         with self._lock:
             return [
                 {"name": name, "samples": int(self._emb[name].shape[0]),
                  "thumb": self._thumb.get(name, "")}
                 for name in sorted(self._emb)
+                if (name in self._ignored) == ignored
             ]
 
     def match(self, embedding: np.ndarray) -> tuple[str | None, float]:

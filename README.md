@@ -15,9 +15,9 @@ instead of bolting on a cloud account or a second machine.
 | App | What it does | Version |
 | --- | --- | --- |
 | **[REFRAMED Gallery](frame_gallery/DOCS.md)** | Curated public-domain art on a Samsung **The Frame** TV — switches daily, never repeats, or show any piece by link | `0.6.0` |
-| **[Local Faces](local_faces/DOCS.md)** | On-device **face recognition** from your cameras — recognized names become an HA sensor | `0.5.0` |
+| **[Local Faces](local_faces/DOCS.md)** | On-device **face recognition** from your cameras — recognized names become an HA sensor, with an ignore list for faces that aren't people | `0.6.0` |
 | **[LedFX](ledfx/DOCS.md)** | Real-time **audio-reactive lighting** for WLED, fed by Music Assistant over Sendspin | `1.7.2` |
-| **[Hue Entertainment](hue_ent/DOCS.md)** | Stream LedFX effects to **Philips Hue Zigbee bulbs** on zigbee2mqtt at 20–25 fps — no Hue Bridge | `0.3.0` |
+| **[Hue Entertainment](hue_ent/DOCS.md)** | Stream LedFX effects to **Philips Hue Zigbee bulbs** on zigbee2mqtt at 20–25 fps — no Hue Bridge | `0.3.1` |
 
 ## Install
 

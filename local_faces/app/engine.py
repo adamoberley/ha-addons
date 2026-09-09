@@ -67,13 +67,21 @@ class FaceEngine:
         return out
 
     @staticmethod
-    def annotate(frame: np.ndarray, results: list[tuple[Face, str | None, float]]) -> np.ndarray:
+    def annotate(
+        frame: np.ndarray, results: list[tuple[Face, str | None, float, bool]]
+    ) -> np.ndarray:
+        """Box every detection: green = known, red = unknown, grey = ignored."""
         img = frame.copy()
-        for face, name, score in results:
+        for face, name, score, ignored in results:
             known = name is not None
-            color = (0, 200, 0) if known else (40, 40, 220)  # BGR: green / red
-            cv2.rectangle(img, (face.x, face.y), (face.x + face.w, face.y + face.h), color, 2)
-            label = f"{name} {score:.0%}" if known else "unknown"
+            if ignored:
+                color, label, weight = (150, 150, 150), f"ignored ({name})", 1
+            elif known:
+                color, label, weight = (0, 200, 0), f"{name} {score:.0%}", 2
+            else:
+                color, label, weight = (40, 40, 220), "unknown", 2
+            cv2.rectangle(img, (face.x, face.y), (face.x + face.w, face.y + face.h),
+                          color, weight)
             cv2.putText(img, label, (face.x, max(14, face.y - 8)),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, weight, cv2.LINE_AA)
         return img

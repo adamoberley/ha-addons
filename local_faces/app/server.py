@@ -3,8 +3,9 @@
 Bound to 0.0.0.0 for ingress (HA authenticates it). All URLs are relative so they
 work under the ingress token path. The handler calls into the App for everything:
 a polled JPEG per camera (ingress doesn't pass MJPEG), capture -> confirm -> save
-enrollment (raw image bytes in the POST body, no multipart), and naming an unknown
-face straight from the log.
+enrollment (raw image bytes in the POST body, no multipart), naming an unknown
+face straight from the log, and putting a face that isn't a person (a poster, a
+photo frame, an arcade cabinet) on the ignore list.
 """
 from __future__ import annotations
 
@@ -138,6 +139,7 @@ PAGE = b"""<!doctype html>
   .thumb { width:42px; height:42px; border-radius:8px; object-fit:cover; flex:none;
            background:var(--field); border:1px solid var(--divider); }
   .thumb.unknown { border-color:var(--error); }
+  .thumb.ignored { border-color:var(--secondary); filter:grayscale(1); opacity:.75; }
   .col { flex:1; min-width:0; }
   .col .name { font-weight:500; font-size:14px; }
   .col .name.is-unknown { color:var(--error); }
@@ -145,6 +147,8 @@ PAGE = b"""<!doctype html>
   .badge { font-size:11px; font-weight:500; padding:3px 9px; border-radius:999px; }
   .badge.known { color:#fff; background:var(--success); }
   .badge.unknown { color:#fff; background:var(--error); }
+  .badge.ignored { color:var(--secondary); background:var(--field);
+                   border:1px solid var(--divider); }
   .link { background:none; border:0; padding:6px 8px; color:var(--primary);
           font-size:13px; font-weight:500; cursor:pointer; }
   .link:hover { text-decoration:underline; }
@@ -221,6 +225,7 @@ PAGE = b"""<!doctype html>
             <div class="lbl">Captured face</div>
             <div class="btns" style="margin-top:8px">
               <button class="btn-primary" id="save">Save face</button>
+              <button class="btn-ghost" id="ignore">Ignore</button>
               <button class="btn-ghost" id="retake">Discard</button>
             </div>
           </div>
@@ -234,11 +239,21 @@ PAGE = b"""<!doctype html>
         <ul class="list" id="people"></ul>
       </section>
 
+      <section class="card ignored">
+        <h2>Ignored faces</h2>
+        <p class="lead">Faces that aren't people - a poster, a photo frame, the
+           artwork on an arcade cabinet. They're still detected, then dropped:
+           no sighting, no sensor change, no notification. Add one with
+           <b>Ignore</b> on a sighting (or on a capture), as many as you like.</p>
+        <ul class="list" id="ignoredList"></ul>
+      </section>
+
       <section class="card sightings">
         <h2>Recent sightings</h2>
         <p class="lead">Every recognized and unknown face, with its camera. Click a
            sighting to enlarge it and put a name to the face - naming more shots of
-           the same person sharpens their recognition.</p>
+           the same person sharpens their recognition - or <b>Ignore</b> it if it
+           isn't a person at all.</p>
         <ul class="list" id="log"></ul>
       </section>
 
@@ -259,8 +274,12 @@ PAGE = b"""<!doctype html>
     </div>
     <div class="btns">
       <button class="btn-primary" id="modalSave">Save</button>
+      <button class="btn-ghost" id="modalIgnore">Ignore</button>
       <button class="btn-ghost" id="modalCancel">Cancel</button>
     </div>
+    <p class="lead" style="margin:10px 0 0">Not a person? <b>Ignore</b> keeps this
+       face out of the log from now on (and clears the ones already there). The
+       name above is used as its label.</p>
     <div class="msg" id="modalMsg" aria-live="polite">&nbsp;</div>
   </div>
 </div>
@@ -333,7 +352,8 @@ PAGE = b"""<!doctype html>
         t.root.classList.toggle("offline", !c.camera_ok);
         if(c.state==="known" && c.recognized) t.who.textContent=c.recognized+"  "+pct(c.score);
         else if(c.state==="unknown") t.who.textContent="Unknown";
-        else if(c.camera_ok) t.who.textContent=c.faces+(c.faces===1?" face":" faces");
+        else if(c.camera_ok) t.who.textContent=c.faces+(c.faces===1?" face":" faces")
+          +(c.ignored?" (+"+c.ignored+" ignored)":"");
         else t.who.textContent="no signal";
         t.who.className="cam-who"+(c.state==="known"?" known":(c.state==="unknown"?" unknown":""));
         anyOk=anyOk||c.camera_ok; anyKnown=anyKnown||c.state==="known"; anyUnknown=anyUnknown||c.state==="unknown";
@@ -345,10 +365,12 @@ PAGE = b"""<!doctype html>
   }
 
   // ---- known people ----
-  function makeThumb(b64, unknown){
-    if(b64){ var im=document.createElement("img"); im.className="thumb"+(unknown?" unknown":"");
+  function makeThumb(b64, kind){
+    // kind: "" (known) | "unknown" | "ignored"
+    var cls="thumb"+(kind?(" "+kind):"");
+    if(b64){ var im=document.createElement("img"); im.className=cls;
       im.src="data:image/jpeg;base64,"+b64; im.alt=""; return im; }
-    var sp=document.createElement("span"); sp.className="thumb"+(unknown?" unknown":""); return sp;
+    var sp=document.createElement("span"); sp.className=cls; return sp;
   }
   function setNameOptions(names){
     var dl=el("names"); dl.innerHTML="";
@@ -367,7 +389,7 @@ PAGE = b"""<!doctype html>
       }
       d.people.forEach(function(p){
         var li=document.createElement("li"); li.className="item";
-        li.appendChild(makeThumb(p.thumb, false));
+        li.appendChild(makeThumb(p.thumb, ""));
         var col=document.createElement("div"); col.className="col";
         var nm=document.createElement("div"); nm.className="name"; nm.textContent=p.name;
         var meta=document.createElement("div"); meta.className="meta";
@@ -385,6 +407,35 @@ PAGE = b"""<!doctype html>
     }).catch(function(){});
   }
 
+  // ---- ignored faces (matched, then dropped) ----
+  function refreshIgnored(){
+    api("ignored").then(function(d){
+      var ul=el("ignoredList"); ul.innerHTML="";
+      var faces=d.faces||[];
+      if(!faces.length){
+        var li=document.createElement("li"); li.className="empty";
+        li.textContent="Nothing ignored yet.";
+        ul.appendChild(li); return;
+      }
+      faces.forEach(function(f){
+        var li=document.createElement("li"); li.className="item";
+        li.appendChild(makeThumb(f.thumb, "ignored"));
+        var col=document.createElement("div"); col.className="col";
+        var nm=document.createElement("div"); nm.className="name"; nm.textContent=f.name;
+        var meta=document.createElement("div"); meta.className="meta";
+        meta.textContent=f.samples+(f.samples===1?" pattern":" patterns");
+        col.appendChild(nm); col.appendChild(meta); li.appendChild(col);
+        var un=document.createElement("button"); un.className="link";
+        un.textContent="Stop ignoring";
+        un.addEventListener("click", function(){
+          api("ignored/delete?name="+encodeURIComponent(f.name), {method:"POST"})
+            .then(function(r){ setMsg(r.message, r.ok?"ok":"err"); refreshIgnored(); });
+        });
+        li.appendChild(un); ul.appendChild(li);
+      });
+    }).catch(function(){});
+  }
+
   // ---- sightings (camera-tagged; click a row to blow it up and name it) ----
   function refreshLog(){
     api("log").then(function(d){
@@ -397,7 +448,7 @@ PAGE = b"""<!doctype html>
       d.events.forEach(function(e){
         var li=document.createElement("li"); li.className="item click";
         li.title="Click to enlarge and name";
-        li.appendChild(makeThumb(e.thumb, e.unknown));
+        li.appendChild(makeThumb(e.thumb, e.unknown ? "unknown" : ""));
         var col=document.createElement("div"); col.className="col";
         var top=document.createElement("div");
         var nm=document.createElement("span");
@@ -431,7 +482,7 @@ PAGE = b"""<!doctype html>
       +"  -  "+(e.camera?e.camera+" - ":"")+fmtTime(e.ts);
     var input=el("modalName");
     input.value=e.unknown?"":(e.name||"");
-    setModalMsg(""); el("modalSave").disabled=false;
+    setModalMsg(""); el("modalSave").disabled=false; el("modalIgnore").disabled=false;
     el("modal").hidden=false; input.focus();
   }
   function closeModal(){ el("modal").hidden=true; modalEvent=null; }
@@ -446,6 +497,23 @@ PAGE = b"""<!doctype html>
       else { setModalMsg(r.message||"Could not save.","err"); el("modalSave").disabled=false; }
     }).catch(function(){ setModalMsg("Save failed. Try again.","err"); el("modalSave").disabled=false; });
   }
+  function ignoreSighting(){
+    if(!modalEvent) return;
+    var label=el("modalName").value.trim();   // optional - the app labels it otherwise
+    el("modalSave").disabled=true; el("modalIgnore").disabled=true;
+    api("sighting/ignore?id="+encodeURIComponent(modalEvent.id)
+        +"&name="+encodeURIComponent(label), {method:"POST"}).then(function(r){
+      if(r.ok){ setMsg(r.message,"ok"); closeModal(); refreshIgnored(); refreshLog(); }
+      else {
+        setModalMsg(r.message||"Could not ignore that face.","err");
+        el("modalSave").disabled=false; el("modalIgnore").disabled=false;
+      }
+    }).catch(function(){
+      setModalMsg("Could not ignore that face. Try again.","err");
+      el("modalSave").disabled=false; el("modalIgnore").disabled=false;
+    });
+  }
+  el("modalIgnore").addEventListener("click", ignoreSighting);
   el("modalSave").addEventListener("click", saveSighting);
   el("modalCancel").addEventListener("click", closeModal);
   el("modalX").addEventListener("click", closeModal);
@@ -487,17 +555,30 @@ PAGE = b"""<!doctype html>
       if(r.ok){ el("name").value=""; resetEnroll(); refreshPeople(); refreshLog(); }
     }).catch(function(){ busy(false); setMsg("Save failed. Try again.","err"); });
   });
+  el("ignore").addEventListener("click", function(){
+    if(!pendingToken){ resetEnroll(); return; }
+    busy(true);
+    api("enroll/ignore?token="+encodeURIComponent(pendingToken)
+        +"&name="+encodeURIComponent(el("name").value.trim()), {method:"POST"})
+      .then(function(r){
+        busy(false); setMsg(r.message, r.ok?"ok":"err");
+        if(r.ok){ el("name").value=""; resetEnroll(); refreshIgnored(); refreshLog(); }
+      }).catch(function(){ busy(false); setMsg("Could not ignore that face.","err"); });
+  });
   el("retake").addEventListener("click", function(){
     if(pendingToken){ api("enroll/cancel?token="+encodeURIComponent(pendingToken), {method:"POST"}); }
     resetEnroll(); setMsg("");
   });
-  function busy(on){ el("save").disabled=on; el("retake").disabled=on; }
+  function busy(on){
+    el("save").disabled=on; el("ignore").disabled=on; el("retake").disabled=on;
+  }
 
-  refreshStatus(); refreshPeople(); refreshLog();
+  refreshStatus(); refreshPeople(); refreshIgnored(); refreshLog();
   setInterval(refreshStatus, 1500);
   setInterval(refreshFeeds, 600);
   setInterval(refreshLog, 5000);
   setInterval(refreshPeople, 15000);
+  setInterval(refreshIgnored, 15000);
 })();
 </script>
 </body>
@@ -537,10 +618,16 @@ def make_server(app, host: str = "0.0.0.0", port: int = 8099):
                 self._json(app.commit_enrollment(self._param("token"), self._param("name")))
             elif path == "/enroll/cancel":
                 self._json(app.cancel_enrollment(self._param("token")))
+            elif path == "/enroll/ignore":
+                self._json(app.ignore_capture(self._param("token"), self._param("name")))
             elif path == "/sighting/name":
                 self._json(app.name_sighting(self._param("id"), self._param("name")))
+            elif path == "/sighting/ignore":
+                self._json(app.ignore_sighting(self._param("id"), self._param("name")))
             elif path == "/person/delete":
                 self._json(app.delete_person(self._param("name")))
+            elif path == "/ignored/delete":
+                self._json(app.unignore(self._param("name")))
             else:
                 self._send(404, "text/plain", b"not found")
 
@@ -552,6 +639,8 @@ def make_server(app, host: str = "0.0.0.0", port: int = 8099):
                 self._json(app.public_status())
             elif path == "/people":
                 self._json({"people": app.db.people()})
+            elif path == "/ignored":
+                self._json({"faces": app.db.ignored_faces()})
             elif path == "/log":
                 self._json({"events": app.reclog.recent()})
             elif path == "/preview.jpg":

@@ -2,7 +2,8 @@
 
 This is the "review later" history shown on the dashboard. Each entry also keeps
 the face embedding (and the model it came from), so an unknown sighting can be
-named straight from the log - that enrolls the stored face without re-capturing.
+named straight from the log - that enrolls the stored face without re-capturing,
+or adds it to the ignore list and clears its past sightings out of the log.
 The list is capped so the file stays small.
 """
 from __future__ import annotations
@@ -14,6 +15,8 @@ import os
 import secrets
 import threading
 import time
+
+import numpy as np
 
 log = logging.getLogger("local-faces.reclog")
 
@@ -84,3 +87,25 @@ class RecognitionLog:
                     e["unknown"] = False
                     self._save()
                     return
+
+    def purge_matching(self, vecs: np.ndarray, threshold: float, model: str) -> int:
+        """Drop past sightings of a face that was just added to the ignore list.
+
+        Ignoring a face stops *future* sightings, but the reason to ignore one is
+        usually that the log is already full of it - so clear those out too. Same
+        cosine test as recognition, and only entries captured with the same model
+        are comparable.
+        """
+        with self._lock:
+            keep, dropped = [], 0
+            for e in self.events:
+                emb = np.array(e.get("emb", []), dtype="float32")
+                if (e.get("model") == model and emb.size == vecs.shape[-1]
+                        and float((vecs @ emb).max()) >= threshold):
+                    dropped += 1
+                    continue
+                keep.append(e)
+            if dropped:
+                self.events = keep
+                self._save()
+        return dropped

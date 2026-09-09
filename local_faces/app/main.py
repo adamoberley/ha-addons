@@ -6,7 +6,10 @@ round-robin, so total CPU stays flat as you add cameras (each is analyzed every
 detect_interval x camera-count). Every camera exposes its own "Recognized Name"
 sensor to Home Assistant over MQTT (plus an aggregate), optionally pushes a phone
 notification, and logs sightings with a snapshot in the ingress dashboard where
-you enroll faces. Recognition, enrollment, and the log stay local; only a
+you enroll faces. Faces that aren't people - the ones printed on a poster, a
+photo frame, or an arcade cabinet - can be added to an *ignore* list from the
+same dashboard; they still get matched, then dropped before anything is logged,
+published or notified. Recognition, enrollment, and the log stay local; only a
 notification can leave your network.
 """
 from __future__ import annotations
@@ -79,7 +82,8 @@ class App:
     @staticmethod
     def _blank(cam) -> dict:
         return {"slug": cam.slug, "name": cam.name, "camera_ok": False, "faces": 0,
-                "recognized": "", "score": 0.0, "state": "idle", "last_ts": 0.0}
+                "ignored": 0, "recognized": "", "score": 0.0, "state": "idle",
+                "last_ts": 0.0}
 
     # ---- lifecycle ---------------------------------------------------------
     def start(self) -> None:
@@ -118,10 +122,15 @@ class App:
 
         faces = self.engine.detect(frame)
         results: list[tuple] = []
+        live: list[tuple] = []          # everything except the ignored faces
         top_name, top_score = None, 0.0
         for face in faces:
             name, score = self.db.match(face.embedding)
-            results.append((face, name, score))
+            ignored = self.db.is_ignored(name)
+            results.append((face, name, score, ignored))
+            if ignored:
+                continue            # a poster, a photo frame - matched, then dropped
+            live.append((face, name, score))
             if name and score > top_score:
                 top_name, top_score = name, score
             self._handle_event(cam, face, name, score)
@@ -134,14 +143,15 @@ class App:
 
         if top_name:
             state = "known"
-        elif any(n is None for _, n, _ in results):
+        elif any(n is None for _, n, _ in live):
             state = "unknown"
         else:
             state = "idle"
-        st.update(faces=len(faces), recognized=top_name or "",
+        st.update(faces=len(live), ignored=len(results) - len(live),
+                  recognized=top_name or "",
                   score=round(top_score, 3) if top_name else 0.0,
                   state=state, last_ts=time.time())
-        self._publish(cam, top_name, results, top_score)
+        self._publish(cam, top_name, live, top_score, ignored=len(results) - len(live))
 
     def _handle_event(self, cam, face, name: str | None, score: float) -> None:
         """Debounce per (camera, identity), then log + (optionally) notify."""
@@ -162,7 +172,7 @@ class App:
         else:
             self.notifier.send(f"Unknown person at {cam.name}")
 
-    def _publish(self, cam, top_name, results, top_score: float) -> None:
+    def _publish(self, cam, top_name, results, top_score: float, ignored: int = 0) -> None:
         if not self.mqtt:
             return
         if top_name:
@@ -172,7 +182,7 @@ class App:
         else:
             state = "none"
         attrs = {"score": round(top_score, 3) if top_name else None,
-                 "faces": len(results), "camera": cam.name,
+                 "faces": len(results), "ignored_faces": ignored, "camera": cam.name,
                  "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S")}
         if self._last_pub.get(cam.slug) != state:
             self._last_pub[cam.slug] = state
@@ -193,6 +203,7 @@ class App:
         return {
             "cameras": [dict(self._status[c.slug]) for c in self.cameras],
             "people": len(self.db.people()),
+            "ignored": len(self.db.ignored_faces()),
             "mqtt": bool(self.mqtt),
             "model": self.opts.recognition_model,
             "mode": self.opts.mode,
@@ -265,9 +276,73 @@ class App:
         return {"ok": True, "message": f"Saved {name} ({samples} {word})."}
 
     def delete_person(self, name: str) -> dict:
-        if self.db.delete((name or "").strip()):
+        name = (name or "").strip()
+        if self.db.delete(name):
             return {"ok": True, "message": f"Removed {name}."}
         return {"ok": False, "message": f"{name} not found."}
+
+    # ---- ignored faces (posters, photo frames, arcade art) -----------------
+    def _ignore(self, emb, thumb: bytes, label: str) -> dict:
+        """Add one face pattern to the ignore list and clear its old sightings."""
+        label = (label or "").strip() or self._next_ignore_label()
+        if self.db.kind(label) == "person":
+            return {"ok": False,
+                    "message": f"{label} is an enrolled person. Use a different label, "
+                               "or remove them first."}
+        samples = self.db.add(label, emb, thumb, ignored=True)
+        vecs = self.db.embeddings_for(label)
+        purged = 0
+        if vecs is not None:
+            purged = self.reclog.purge_matching(
+                vecs, self.opts.recognition_threshold, self.opts.recognition_model
+            )
+        log.info("ignoring '%s' (%d pattern(s), %d past sighting(s) cleared)",
+                 label, samples, purged)
+        word = "pattern" if samples == 1 else "patterns"
+        tail = f" Cleared {purged} past sighting(s)." if purged else ""
+        return {"ok": True,
+                "message": f"Ignoring {label} ({samples} {word})." + tail,
+                "name": label}
+
+    def _next_ignore_label(self) -> str:
+        """Default label, so ignoring a face never needs typing."""
+        taken = {f["name"] for f in self.db.ignored_faces()}
+        if "Ignored face" not in taken:
+            return "Ignored face"
+        n = 2
+        while f"Ignored face {n}" in taken:
+            n += 1
+        return f"Ignored face {n}"
+
+    def ignore_sighting(self, sighting_id: str, label: str = "") -> dict:
+        """Ignore the face in a log entry - the arcade-cabinet case from #13."""
+        event = self.reclog.get(sighting_id)
+        if not event:
+            return {"ok": False, "message": "That sighting has scrolled out of the log."}
+        if event.get("model") != self.opts.recognition_model:
+            return {"ok": False,
+                    "message": "That face was captured with a different recognition model. "
+                               "Use Capture instead."}
+        emb = np.array(event.get("emb", []), dtype="float32")
+        if emb.size == 0:
+            return {"ok": False, "message": "That sighting has no usable face data."}
+        thumb = base64.b64decode(event["thumb"]) if event.get("thumb") else b""
+        return self._ignore(emb, thumb, label)
+
+    def ignore_capture(self, token: str, label: str = "") -> dict:
+        """Ignore a freshly captured/uploaded face (point a camera at the poster)."""
+        with self._lock:
+            pending = self._pending.pop(token, None)
+        if not pending:
+            return {"ok": False, "message": "That capture expired. Capture the face again."}
+        return self._ignore(pending["emb"], pending["thumb"], label)
+
+    def unignore(self, name: str) -> dict:
+        name = (name or "").strip()
+        if self.db.kind(name) != "ignored":
+            return {"ok": False, "message": f"{name} is not on the ignore list."}
+        self.db.delete(name)
+        return {"ok": True, "message": f"No longer ignoring {name}."}
 
 
 def main() -> int:

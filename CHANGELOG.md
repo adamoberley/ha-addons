@@ -1,5 +1,18 @@
 # Changelog
 
+## Local Faces 0.6.0 — 2026-09-08
+
+**Ignore the faces that aren't people.** A poster, a photo frame, a paused TV, the
+artwork on an arcade cabinet: real faces that never move, and every one of them
+kept filling *Recent sightings* with unknown arrivals
+([#13](https://github.com/adamoberley/ha-addons/issues/13)). Hit **Ignore** on
+such a sighting (or on a deliberate capture) and it's matched and then dropped —
+out of the log, the sensors and the notifications — plus its existing sightings
+are cleared, so the history you were trying to clean up goes too. The list holds
+as many entries as you like, each with as many patterns as you care to add, and
+an enrolled person can never be ignored by mistake. Ignored faces show as grey
+*ignored* boxes in the live view, and cameras report an `ignored_faces` attribute.
+
 ## Hue Entertainment 0.3.1 — 2026-09-08
 
 **Auto zones found no rooms.** Area discovery aborted with `too many values to
@@ -12,6 +25,7 @@ now shape-tolerant (unreadable entries are skipped and named, Zigbee addresses
 found by pattern), also honors rooms assigned on the *entity* instead of the
 device, and the sidebar panel now shows *why* no rooms came back rather than
 always blaming missing color bulbs.
+
 ## LedFX 1.7.2 — 2026-09-08
 
 **Sendspin audio couldn't connect at all.** Every attempt failed before it reached
@@ -24,6 +38,7 @@ shipped got an incompatible library. Now pinned to `aiosendspin==6.1.1` (the ran
 upstream LedFX itself caps to), and the build *verifies* the client API so a future
 dependency drift fails loudly instead of shipping silent-audio lights. **Rebuild
 the app** after updating so the image picks up the pin.
+
 
 ## REFRAMED Gallery 0.6.0 — 2026-08-01
 
