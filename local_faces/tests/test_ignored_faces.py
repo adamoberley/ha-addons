@@ -9,45 +9,17 @@ skipped, not detected less.
 
 from __future__ import annotations
 
-import sys
-import threading
 from pathlib import Path
 
-import numpy as np
-import pytest
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app"))
-
-import engine as engine_mod
 import facedb as facedb_mod
-import main as main_mod
-import options as options_mod
-import reclog as reclog_mod
-
-
-def vec(*values: float) -> np.ndarray:
-    """A unit-length embedding, so dot products are cosines."""
-    arr = np.array(values, dtype="float32")
-    return arr / np.linalg.norm(arr)
-
+import numpy as np
+from helpers import FakeEngine, face_at, make_app, vec
 
 ALEX = vec(1, 0, 0)
 ALEX_ALT = vec(0.98, 0.2, 0)      # same person, another angle
 CABINET = vec(0, 1, 0)            # a face painted on the arcade machine
 CABINET_ALT = vec(0.05, 0.99, 0)
 POSTER = vec(0, 0, 1)             # a different not-a-person face
-
-
-@pytest.fixture
-def db(tmp_path, monkeypatch):
-    monkeypatch.setattr(facedb_mod, "DB_PATH", str(tmp_path / "faces.json"))
-    return facedb_mod.FaceDB(threshold=0.5, model_id="sface")
-
-
-@pytest.fixture
-def log(tmp_path, monkeypatch):
-    monkeypatch.setattr(reclog_mod, "LOG_PATH", str(tmp_path / "log.json"))
-    return reclog_mod.RecognitionLog()
 
 
 # --- the face db ----------------------------------------------------------
@@ -150,88 +122,9 @@ def test_purge_matching_ignores_other_dimensions(log):
 
 # --- the pipeline: nothing about an ignored face escapes -------------------
 
-class FakeCamera:
-    slug = "arcade"
-    name = "Arcade"
-
-
-class FakeSource:
-    def __init__(self, frame):
-        self._frame = frame
-
-    def latest(self):
-        return self._frame
-
-
-class FakeMqtt:
-    def __init__(self):
-        self.published: list[tuple] = []
-
-    def publish(self, slug, state, attrs):
-        self.published.append((slug, state, attrs))
-
-
-class FakeNotifier:
-    def __init__(self):
-        self.sent: list[str] = []
-
-    def send(self, message):
-        self.sent.append(message)
-
-
-class FakeEngine:
-    """Returns pre-baked detections; annotate() is the real one."""
-
-    def __init__(self, faces):
-        self._faces = faces
-
-    def detect(self, _frame):
-        return list(self._faces)
-
-    @staticmethod
-    def annotate(frame, results):
-        return engine_mod.FaceEngine.annotate(frame, results)
-
-
-def make_app(db, log, faces, monkeypatch, tmp_path):
-    app = main_mod.App.__new__(main_mod.App)
-    app.opts = options_mod.Options(
-        stream_url="", camera_mode="stream", cameras=(), preview_aspect="auto",
-        mode="balanced", recognition_model="sface", recognition_model_url="",
-        detect_interval=1.0, recognition_threshold=0.5, min_face_size=60,
-        cooldown_seconds=0, notify_service="notify.test", notify_unknown=True,
-        enable_mqtt=True, mqtt_host="", mqtt_port=1883, mqtt_username="",
-        mqtt_password="", log_level="info",
-    )
-    cam = FakeCamera()
-    app.cameras = [cam]
-    app.engine = FakeEngine(faces)
-    app.db = db
-    app.reclog = log
-    app.sources = {cam.slug: FakeSource(np.zeros((120, 160, 3), dtype="uint8"))}
-    app.mqtt = FakeMqtt()
-    app.notifier = FakeNotifier()
-    app.httpd = None
-    app.running = True
-    app._lock = threading.Lock()
-    app._previews = {}
-    app._status = {cam.slug: main_mod.App._blank(cam)}
-    app._cooldown = {}
-    app._last_pub = {}
-    app._pending = {}
-    app._rr = 0
-    return app, cam
-
-
-def face_at(embedding, x=10):
-    return engine_mod.Face(x=x, y=10, w=40, h=40, score=0.99, embedding=embedding, thumb=b"")
-
-
-def test_an_ignored_face_produces_no_sighting_sensor_or_notification(
-    db, log, monkeypatch, tmp_path
-):
+def test_an_ignored_face_produces_no_sighting_sensor_or_notification(db, log):
     db.add("Arcade cabinet", CABINET, b"", ignored=True)
-    app, _ = make_app(db, log, [face_at(CABINET_ALT)], monkeypatch, tmp_path)
+    app, _ = make_app(db, log, [face_at(CABINET_ALT)])
 
     app.tick()
 
@@ -242,14 +135,10 @@ def test_an_ignored_face_produces_no_sighting_sensor_or_notification(
     assert (status["state"], status["faces"], status["ignored"]) == ("idle", 0, 1)
 
 
-def test_a_real_person_is_unaffected_by_a_nearby_ignored_face(
-    db, log, monkeypatch, tmp_path
-):
+def test_a_real_person_is_unaffected_by_a_nearby_ignored_face(db, log):
     db.add("Alex", ALEX, b"")
     db.add("Arcade cabinet", CABINET, b"", ignored=True)
-    app, _ = make_app(
-        db, log, [face_at(CABINET_ALT, x=10), face_at(ALEX_ALT, x=80)], monkeypatch, tmp_path
-    )
+    app, _ = make_app(db, log, [face_at(CABINET_ALT, x=10), face_at(ALEX_ALT, x=80)])
 
     app.tick()
 
@@ -262,11 +151,9 @@ def test_a_real_person_is_unaffected_by_a_nearby_ignored_face(
     assert (status["state"], status["faces"], status["ignored"]) == ("known", 1, 1)
 
 
-def test_an_unknown_face_still_reports_unknown(db, log, monkeypatch, tmp_path):
+def test_an_unknown_face_still_reports_unknown(db, log):
     db.add("Arcade cabinet", CABINET, b"", ignored=True)
-    app, _ = make_app(
-        db, log, [face_at(CABINET, x=10), face_at(POSTER, x=80)], monkeypatch, tmp_path
-    )
+    app, _ = make_app(db, log, [face_at(CABINET, x=10), face_at(POSTER, x=80)])
 
     app.tick()
 
@@ -275,9 +162,9 @@ def test_an_unknown_face_still_reports_unknown(db, log, monkeypatch, tmp_path):
     assert app.mqtt.published[0][1] == "unknown"
 
 
-def test_ignoring_a_sighting_also_clears_the_log(db, log, monkeypatch, tmp_path):
+def test_ignoring_a_sighting_also_clears_the_log(db, log):
     """The end-to-end move from the dashboard: Ignore on a logged sighting."""
-    app, _ = make_app(db, log, [face_at(CABINET)], monkeypatch, tmp_path)
+    app, _ = make_app(db, log, [face_at(CABINET)])
     app.tick()                                    # logs it as unknown
     sighting = log.recent()[0]
 
@@ -293,8 +180,8 @@ def test_ignoring_a_sighting_also_clears_the_log(db, log, monkeypatch, tmp_path)
     assert log.recent() == []
 
 
-def test_ignoring_without_a_label_names_it_for_you(db, log, monkeypatch, tmp_path):
-    app, _ = make_app(db, log, [face_at(CABINET)], monkeypatch, tmp_path)
+def test_ignoring_without_a_label_names_it_for_you(db, log):
+    app, _ = make_app(db, log, [face_at(CABINET)])
     app.tick()
     first = log.recent()[0]
     assert app.ignore_sighting(first["id"], "")["name"] == "Ignored face"
@@ -306,9 +193,9 @@ def test_ignoring_without_a_label_names_it_for_you(db, log, monkeypatch, tmp_pat
     assert app.ignore_sighting(second["id"], "")["name"] == "Ignored face 2"
 
 
-def test_ignoring_refuses_to_shadow_an_enrolled_person(db, log, monkeypatch, tmp_path):
+def test_ignoring_refuses_to_shadow_an_enrolled_person(db, log):
     db.add("Alex", ALEX, b"")
-    app, _ = make_app(db, log, [face_at(CABINET)], monkeypatch, tmp_path)
+    app, _ = make_app(db, log, [face_at(CABINET)])
     app.tick()
     sighting = log.recent()[0]
 
@@ -319,8 +206,8 @@ def test_ignoring_refuses_to_shadow_an_enrolled_person(db, log, monkeypatch, tmp
     assert db.kind("Alex") == "person"
 
 
-def test_ignoring_a_capture_uses_the_staged_face(db, log, monkeypatch, tmp_path):
-    app, _ = make_app(db, log, [face_at(CABINET)], monkeypatch, tmp_path)
+def test_ignoring_a_capture_uses_the_staged_face(db, log):
+    app, _ = make_app(db, log, [face_at(CABINET)])
     staged = app.stage_from_frame("arcade")
     assert staged["ok"]
 
@@ -331,8 +218,8 @@ def test_ignoring_a_capture_uses_the_staged_face(db, log, monkeypatch, tmp_path)
     assert not app.ignore_capture(staged["token"], "x")["ok"]   # token is single-use
 
 
-def test_unignore_reports_an_unknown_name(db, log, monkeypatch, tmp_path):
-    app, _ = make_app(db, log, [], monkeypatch, tmp_path)
+def test_unignore_reports_an_unknown_name(db, log):
+    app, _ = make_app(db, log, [])
     assert not app.unignore("Nothing")["ok"]
     db.add("Arcade cabinet", CABINET, b"", ignored=True)
     assert app.unignore("Arcade cabinet")["ok"]

@@ -1,11 +1,19 @@
-"""Publish a "Recognized Name" sensor per camera (plus an aggregate) over MQTT.
+"""Publish the Home Assistant entities over MQTT: cameras, and people.
 
 Broker details come from the Supervisor's MQTT service automatically (so the
 Mosquitto app just works), or from the app options for an external broker.
-Each camera gets sensor.local_faces_<slug>; sensor.local_faces_recognized_name is
-kept as an "anyone known, any camera" aggregate for backward compatibility. We
-publish retained discovery once, then state per camera. This is the only thing
-that creates HA entities - if MQTT isn't available the app still runs
+
+  * one ``sensor.local_faces_<camera>`` per camera - who that camera can see;
+  * ``sensor.local_faces_recognized_name`` - the "anyone known, any camera"
+    aggregate, kept for backward compatibility;
+  * one ``binary_sensor.local_faces_<person>`` per enrolled person - on while
+    that person has been seen within the presence timeout, with ``last_seen``,
+    ``camera`` and ``score`` attributes. This is the entity automations actually
+    want ("when Alex arrives"), instead of templating over a name string.
+
+Discovery is retained and re-announced on every (re)connect, and a person's
+entity is removed from Home Assistant when you delete them. This module is the
+only thing that creates entities - if MQTT isn't available the app still runs
 (dashboard, log, notify).
 """
 from __future__ import annotations
@@ -13,6 +21,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 
 import requests
 
@@ -33,6 +42,29 @@ def _attr_topic(slug: str) -> str:
 
 def _disco_topic(slug: str) -> str:
     return f"homeassistant/sensor/{NODE}/{slug}/config"
+
+
+def _person_disco_topic(slug: str) -> str:
+    return f"homeassistant/binary_sensor/{NODE}/person_{slug}/config"
+
+
+def person_slugs(names) -> dict[str, str]:
+    """{name: entity slug} for enrolled people.
+
+    Assigned over the sorted names so the same set always produces the same
+    entity ids (an entity id that moves between restarts is worse than an ugly
+    one), with a numeric suffix when two names slugify the same.
+    """
+    out: dict[str, str] = {}
+    taken: set[str] = set()
+    for name in sorted(names):
+        base = re.sub(r"[^a-z0-9]+", "_", str(name).lower()).strip("_") or "person"
+        slug, n = base, 2
+        while slug in taken:
+            slug, n = f"{base}_{n}", n + 1
+        taken.add(slug)
+        out[name] = slug
+    return out
 
 
 def _new_client(mqtt):
@@ -134,6 +166,60 @@ class MqttPublisher:
             return
         self.client.publish(_state_topic(slug), state, retain=True)
         self.client.publish(_attr_topic(slug), json.dumps(attrs), retain=True)
+
+    # -- per-person presence entities --------------------------------------
+
+    def _announce_person(self, client, name: str, slug: str) -> None:
+        client.publish(_person_disco_topic(slug), json.dumps({
+            "name": name,
+            "object_id": f"{NODE}_{slug}",
+            "unique_id": f"{NODE}_person_{slug}",
+            "state_topic": _state_topic(f"person_{slug}"),
+            "json_attributes_topic": _attr_topic(f"person_{slug}"),
+            "availability_topic": AVAIL_TOPIC,
+            "device_class": "occupancy",
+            "payload_on": "ON",
+            "payload_off": "OFF",
+            "icon": "mdi:account",
+            "device": _device(),
+        }), retain=True)
+
+    def announce_people(self, names) -> dict[str, str]:
+        """Create/remove person entities to match the enrolled people.
+
+        Returns {name: slug}. Safe to call on every enrollment change: only the
+        difference is published, and a removed person's entity is deleted from
+        Home Assistant rather than left behind as "unavailable".
+        """
+        wanted = person_slugs(names)
+        if wanted == self.people:
+            return dict(self.people)
+        previous = self.people
+        self.people = wanted
+        if not self.client:
+            return dict(wanted)
+        for name, slug in wanted.items():
+            self._announce_person(self.client, name, slug)
+        live = set(wanted.values())
+        for slug in previous.values():
+            if slug not in live:
+                self.clear_person(slug)
+        return dict(wanted)
+
+    def publish_person(self, slug: str, present: bool, attrs: dict) -> None:
+        if not self.client:
+            return
+        topic = f"person_{slug}"
+        self.client.publish(_state_topic(topic), "ON" if present else "OFF", retain=True)
+        self.client.publish(_attr_topic(topic), json.dumps(attrs), retain=True)
+
+    def clear_person(self, slug: str) -> None:
+        """Remove a person's entity from Home Assistant (empty retained config)."""
+        if not self.client:
+            return
+        self.client.publish(_person_disco_topic(slug), "", retain=True)
+        self.client.publish(_state_topic(f"person_{slug}"), "", retain=True)
+        self.client.publish(_attr_topic(f"person_{slug}"), "", retain=True)
 
     def stop(self) -> None:
         if not self.client:

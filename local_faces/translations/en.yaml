@@ -71,6 +71,20 @@ configuration:
   notify_unknown:
     name: Notify on unknown faces
     description: Also send a notification when an unrecognized face is seen.
+  person_sensors:
+    name: One sensor per person
+    description: >-
+      Also expose a presence sensor for each enrolled person
+      (binary_sensor.local_faces_<name>) - on while they have been seen
+      recently, with last_seen, camera and score attributes. This is what
+      "when Alex arrives" automations want. Entities appear and disappear as
+      you enroll and remove people.
+  presence_timeout_seconds:
+    name: Presence timeout (s)
+    description: >-
+      How long a person stays "present" after their last sighting before their
+      sensor turns off (10-3600 s). Longer rides out someone walking out of
+      frame; shorter reacts faster when they leave.
   enable_mqtt:
     name: Publish HA sensor (MQTT)
     description: >-

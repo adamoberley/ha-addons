@@ -4,8 +4,9 @@ Bound to 0.0.0.0 for ingress (HA authenticates it). All URLs are relative so the
 work under the ingress token path. The handler calls into the App for everything:
 a polled JPEG per camera (ingress doesn't pass MJPEG), capture -> confirm -> save
 enrollment (raw image bytes in the POST body, no multipart), naming an unknown
-face straight from the log, and putting a face that isn't a person (a poster, a
-photo frame, an arcade cabinet) on the ignore list.
+face straight from the log, putting a face that isn't a person (a poster, a photo
+frame, an arcade cabinet) on the ignore list - and acting on the app's own
+suggestions about which faces those are.
 """
 from __future__ import annotations
 
@@ -149,6 +150,9 @@ PAGE = b"""<!doctype html>
   .badge.unknown { color:#fff; background:var(--error); }
   .badge.ignored { color:var(--secondary); background:var(--field);
                    border:1px solid var(--divider); }
+  .badge.hint { color:#fff; background:var(--primary); }
+  .card.suggest { border-left:3px solid var(--primary); }
+  .item .acts { display:flex; gap:2px; flex-wrap:wrap; justify-content:flex-end; }
   .link { background:none; border:0; padding:6px 8px; color:var(--primary);
           font-size:13px; font-weight:500; cursor:pointer; }
   .link:hover { text-decoration:underline; }
@@ -234,6 +238,15 @@ PAGE = b"""<!doctype html>
         <div class="msg" id="msg" aria-live="polite">&nbsp;</div>
       </section>
 
+      <section class="card suggest" id="suggestCard" hidden>
+        <h2>Probably not a person</h2>
+        <p class="lead">These faces have been sitting in the same spot for a
+           while, which people don't do &mdash; a poster, a photo frame, a paused
+           TV. Ignore one and it stops filling your log; <b>It's a person</b>
+           keeps it and we won't ask again.</p>
+        <ul class="list" id="suggestions"></ul>
+      </section>
+
       <section class="card people">
         <h2>Known people</h2>
         <ul class="list" id="people"></ul>
@@ -294,6 +307,14 @@ PAGE = b"""<!doctype html>
   function setMsg(t, kind){ var m=el("msg"); m.textContent=t||" ";
     m.className="msg"+(kind?(" "+kind):""); }
   function fmtTime(t){ return t ? new Date(t*1000).toLocaleString() : "-"; }
+  function rel(ts){
+    if(!ts) return "never";
+    var s=Math.max(0, Math.round(Date.now()/1000 - ts));
+    if(s < 60) return "just now";
+    if(s < 3600) return Math.round(s/60)+" min ago";
+    if(s < 86400) return Math.round(s/3600)+" h ago";
+    return Math.round(s/86400)+" d ago";
+  }
   function pct(s){ return Math.round(s*100)+"%"; }
   function api(path, opts){
     return fetch(path, Object.assign({cache:"no-store"}, opts||{}))
@@ -395,8 +416,19 @@ PAGE = b"""<!doctype html>
         li.appendChild(makeThumb(p.thumb, ""));
         var col=document.createElement("div"); col.className="col";
         var nm=document.createElement("div"); nm.className="name"; nm.textContent=p.name;
+        if(p.present){
+          var here=document.createElement("span"); here.className="badge known";
+          here.textContent="here"; here.style.marginLeft="8px";
+          nm.appendChild(here);
+        }
         var meta=document.createElement("div"); meta.className="meta";
-        meta.textContent=p.samples+(p.samples===1?" sample":" samples");
+        var bits=[p.samples+(p.samples===1?" sample":" samples")];
+        if(p.last_seen){
+          bits.push("seen "+rel(p.last_seen)+(p.last_camera?" at "+p.last_camera:""));
+        } else {
+          bits.push("not seen yet");
+        }
+        meta.textContent=bits.join(" \\u00b7 ");   // a middot, escaped for JS
         col.appendChild(nm); col.appendChild(meta); li.appendChild(col);
         var del=document.createElement("button"); del.className="link danger";
         del.textContent="Remove";
@@ -407,6 +439,50 @@ PAGE = b"""<!doctype html>
                                refreshPeople(); refreshLog(); });
         });
         li.appendChild(del); ul.appendChild(li);
+      });
+    }).catch(function(){});
+  }
+
+  // ---- "probably not a person": faces that never move ----
+  function refreshSuggestions(){
+    api("suggestions").then(function(d){
+      var list=d.suggestions||[];
+      el("suggestCard").hidden = !list.length;
+      var ul=el("suggestions"); ul.innerHTML="";
+      list.forEach(function(c){
+        var li=document.createElement("li"); li.className="item";
+        li.appendChild(makeThumb(c.thumb, "ignored"));
+        var col=document.createElement("div"); col.className="col";
+        var top=document.createElement("div");
+        var nm=document.createElement("span"); nm.className="name";
+        nm.textContent=c.camera||"Camera"; nm.style.marginRight="8px";
+        var badge=document.createElement("span"); badge.className="badge hint";
+        badge.textContent="same spot "+c.span;
+        top.appendChild(nm); top.appendChild(badge);
+        var meta=document.createElement("div"); meta.className="meta";
+        meta.textContent=c.hits+" sightings, first "+fmtTime(c.first_ts);
+        col.appendChild(top); col.appendChild(meta); li.appendChild(col);
+
+        var acts=document.createElement("div"); acts.className="acts";
+        var ign=document.createElement("button"); ign.className="link";
+        ign.textContent="Ignore";
+        ign.addEventListener("click", function(){
+          ign.disabled=true;
+          api("suggestion/ignore?id="+encodeURIComponent(c.id), {method:"POST"})
+            .then(function(r){
+              setMsg(r.message, r.ok?"ok":"err");
+              refreshSuggestions(); refreshIgnored(); refreshLog();
+            });
+        });
+        var keep=document.createElement("button"); keep.className="link";
+        keep.textContent="It's a person";
+        keep.addEventListener("click", function(){
+          keep.disabled=true;
+          api("suggestion/dismiss?id="+encodeURIComponent(c.id), {method:"POST"})
+            .then(function(r){ setMsg(r.message, r.ok?"ok":"err"); refreshSuggestions(); });
+        });
+        acts.appendChild(ign); acts.appendChild(keep); li.appendChild(acts);
+        ul.appendChild(li);
       });
     }).catch(function(){});
   }
@@ -581,12 +657,13 @@ PAGE = b"""<!doctype html>
     el("save").disabled=on; el("ignore").disabled=on; el("retake").disabled=on;
   }
 
-  refreshStatus(); refreshPeople(); refreshIgnored(); refreshLog();
+  refreshStatus(); refreshPeople(); refreshIgnored(); refreshLog(); refreshSuggestions();
   setInterval(refreshStatus, 1500);
   setInterval(refreshFeeds, 600);
   setInterval(refreshLog, 5000);
   setInterval(refreshPeople, 15000);
   setInterval(refreshIgnored, 15000);
+  setInterval(refreshSuggestions, 30000);
 })();
 </script>
 </body>
@@ -636,6 +713,10 @@ def make_server(app, host: str = "0.0.0.0", port: int = 8099):
                 self._json(app.delete_person(self._param("name")))
             elif path == "/ignored/delete":
                 self._json(app.unignore(self._param("name")))
+            elif path == "/suggestion/ignore":
+                self._json(app.ignore_suggestion(self._param("id"), self._param("name")))
+            elif path == "/suggestion/dismiss":
+                self._json(app.dismiss_suggestion(self._param("id")))
             else:
                 self._send(404, "text/plain", b"not found")
 
@@ -646,9 +727,11 @@ def make_server(app, host: str = "0.0.0.0", port: int = 8099):
             elif path == "/status":
                 self._json(app.public_status())
             elif path == "/people":
-                self._json({"people": app.db.people()})
+                self._json({"people": app.people_view()})
             elif path == "/ignored":
                 self._json({"faces": app.db.ignored_faces()})
+            elif path == "/suggestions":
+                self._json({"suggestions": app.suggestions()})
             elif path == "/log":
                 self._json({"events": app.reclog.recent()})
             elif path == "/preview.jpg":

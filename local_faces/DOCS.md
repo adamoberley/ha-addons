@@ -82,9 +82,29 @@ model — `sface` is good at `0.363`; for `mobilefacenet_w600k` start lower (aro
 ## What you get
 
 - **HA sensor** — `sensor.recognized_name` holds the last recognized name
-  (`none` / `unknown` when nobody known is in view), with `score`, `faces`, and
-  `timestamp` attributes. Automate freely: unlock for known people, alert on
-  unknown, announce arrivals.
+  (`none` / `unknown` when nobody known is in view), with `score`, `faces`,
+  `ignored_faces`, and `timestamp` attributes. One per camera too
+  (`sensor.local_faces_<camera>`).
+- **A presence sensor per person** — `binary_sensor.local_faces_<name>` is *on*
+  while that person has been seen recently, with `last_seen`, `camera` and
+  `score` attributes. This is the entity most automations actually want:
+
+  ```yaml
+  # Hallway light + a greeting when Alex gets home
+  triggers:
+    - trigger: state
+      entity_id: binary_sensor.local_faces_alex
+      from: "off"
+      to: "on"
+  actions:
+    - action: light.turn_on
+      target: {entity_id: light.hallway}
+  ```
+
+  Entities appear as you enroll people and are removed from Home Assistant when
+  you delete them — no restart either way. Turn the whole set off with the
+  **One sensor per person** option, and tune how long someone stays "present"
+  after their last sighting with **Presence timeout**.
 - **Push notification** — optional ping via any HA notify service. Sent in the
   background, so a slow notify service never holds up recognition (if one wedges,
   alerts are dropped rather than cameras stalling).
@@ -130,6 +150,27 @@ Notes:
 - Entries are stored per recognition model, like enrollments, in
   `/data/faces.json`. Nothing leaves the box.
 
+## "Probably not a person"
+
+You shouldn't have to notice a poster filling your log before you can do
+something about it, so the app looks for the giveaway itself: a face that keeps
+appearing **in the same spot in the frame** with the **same** embedding for half
+an hour or more. People don't do that; pictures do.
+
+When it finds one, a **Probably not a person** card appears on the dashboard with
+the thumbnail, which camera, how long it has been sitting there and how many
+times it's been seen:
+
+- **Ignore** adds it to the ignore list (above) and clears its past sightings.
+- **It's a person** keeps it and is remembered — that face is never suggested
+  again, across restarts.
+
+It only ever suggests; someone sitting still on a sofa can look like this for a
+while, which is why nothing happens without your click. Faces that match an
+enrolled person are never suggested, and ignoring one by hand is refused —
+their embeddings are the same face, so ignoring the photo would stop the real
+person being recognized too.
+
 ## Tuning
 
 | Symptom | Try |
@@ -140,6 +181,8 @@ Notes:
 | Distant false detections | Raise **Minimum face size** |
 | Notified too often | Raise **Re-trigger cooldown** |
 | A poster / TV / photo keeps being logged | **Ignore** that sighting (see above) |
+| Someone stays "present" too long after leaving | Lower **Presence timeout** |
+| Someone flickers between present and away | Raise **Presence timeout** |
 
 ## Notes & limits
 
