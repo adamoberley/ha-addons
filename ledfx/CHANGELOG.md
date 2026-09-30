@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.7.3 — 2026-09-30
+
+- **Fixed: Sendspin connected and decoded audio, but VU Meter, Spectrum and the
+  other audio-reactive effects stayed black**
+  ([#23](https://github.com/adamoberley/ha-addons/issues/23)). LedFX compared
+  Sendspin's play times — computed on `aiosendspin`'s raw monotonic clock — with
+  its event loop's clock, and the two drift apart the longer the machine has
+  been up (about 21 s on the reporter's box). Once the loop clock is ahead,
+  every chunk of audio looks late and is silently discarded before it reaches
+  the effects. Both comparisons now use the Sendspin client's own clock. The bug
+  is still on upstream LedFX `main`, so this is patched into the image at build
+  time; thanks to @collejosselin-hue for tracking it down and validating the fix.
+- **Late audio is now logged.** If audio is ever dropped for arriving more than a
+  second late — a clock problem rather than network jitter — the log says so
+  (at most every 30 s) instead of the effects just going dark.
+
 ## 1.7.2 — 2026-09-08
 
 - **Fixed: Sendspin audio could not connect at all** — every attempt failed with

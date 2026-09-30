@@ -1,5 +1,12 @@
 # Changelog
 
+## LedFX 1.7.3 — 2026-09-30
+
+**Audio-reactive effects work over Sendspin again** (#23): audio connected and
+decoded, but was discarded as "late" because LedFX compared times from two
+different clocks. The image now patches both comparisons to the Sendspin
+client's clock, and logs if audio is ever dropped for being seconds late.
+
 ## Local Faces 0.7.1 — 2026-09-30
 
 **Fixes the crash on start in 0.7.0** (#21): with *One sensor per person* on,
