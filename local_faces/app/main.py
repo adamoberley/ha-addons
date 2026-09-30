@@ -20,6 +20,7 @@ your network.
 from __future__ import annotations
 
 import base64
+import datetime
 import logging
 import secrets
 import signal
@@ -35,8 +36,11 @@ from camera import CameraSource, HaCameraSource
 from engine import FaceEngine
 from facedb import FaceDB
 from hass import EventSender, HaClient, TriggerWatcher
+from models import ensure_quality_model
 from mqtt_pub import MqttPublisher
 from notify import Notifier
+from quality import QualityScorer
+from quality import label as quality_label
 from reclog import RecognitionLog
 from statics import StaticWatcher
 
@@ -45,6 +49,12 @@ UNKNOWN_KEY = "__unknown__"
 
 log = logging.getLogger("local-faces")
 _stop = threading.Event()
+
+
+def _iso(ts: float | None = None) -> str:
+    """Local time *with* its UTC offset, so HA templates can't misread it."""
+    moment = datetime.datetime.fromtimestamp(time.time() if ts is None else ts)
+    return moment.astimezone().isoformat(timespec="seconds")
 
 
 def _setup_logging(level_name: str) -> None:
@@ -80,6 +90,7 @@ class App:
         self.mqtt = MqttPublisher(opts, self.cameras) if opts.enable_mqtt else None
         self.notifier = Notifier(opts)
         self.statics = StaticWatcher(opts.recognition_threshold, opts.recognition_model)
+        self.quality = QualityScorer(ensure_quality_model())
         self.httpd = None
 
         self.running = True
@@ -257,7 +268,7 @@ class App:
             "camera": cam.name,
             "camera_slug": cam.slug,
             "camera_entity": getattr(cam, "camera_entity", "") or None,
-            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            "timestamp": _iso(),
         })
         if unknown and not self.opts.notify_unknown:
             return
@@ -277,7 +288,7 @@ class App:
             state = "none"
         attrs = {"score": round(top_score, 3) if top_name else None,
                  "faces": len(results), "ignored_faces": ignored, "camera": cam.name,
-                 "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S")}
+                 "timestamp": _iso()}
         if self._last_pub.get(cam.slug) != state:
             self._last_pub[cam.slug] = state
             self.mqtt.publish(cam.slug, state, attrs)
@@ -303,7 +314,8 @@ class App:
         seen = self._seen.get(name) or {}
         ts = seen.get("ts")
         return {
-            "last_seen": (time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(ts)) if ts else None),
+            "person": name,           # the enrolled name, without HA's device prefix
+            "last_seen": _iso(ts) if ts else None,
             "camera": seen.get("camera") or None,
             "score": seen.get("score"),
         }
@@ -336,6 +348,10 @@ class App:
         out = []
         for person in self.db.people():
             seen = self._seen.get(person["name"]) or {}
+            samples = self.db.samples(person["name"]) or []
+            person = {**person, "flagged": sum(
+                1 for smp in samples
+                if smp["outlier"] or quality_label(smp["quality"]) == "poor")}
             out.append({**person,
                         "last_seen": seen.get("ts"),
                         "last_camera": seen.get("camera") or "",
@@ -398,22 +414,45 @@ class App:
         face = max(faces, key=lambda f: f.w * f.h)
         token = secrets.token_hex(8)
         now = time.time()
+        q = self.quality.score_thumb(face.thumb)
         with self._lock:
             self._pending = {t: v for t, v in self._pending.items() if now - v["ts"] < 600}
-            self._pending[token] = {"emb": face.embedding, "thumb": face.thumb, "ts": now}
-        return {"ok": True, "token": token,
-                "thumb": base64.b64encode(face.thumb).decode("ascii"),
-                "message": "Face captured. Give it a name to save."}
+            self._pending[token] = {"emb": face.embedding, "thumb": face.thumb, "ts": now,
+                                    "quality": q}
+        grade = quality_label(q)
+        message = "Face captured. Give it a name to save."
+        if grade == "poor":
+            message = ("Face captured, but it's blurry or too small to recognize well. "
+                       "Try another shot if you can.")
+        elif grade == "fair":
+            message = "Face captured (quality is only fair - a sharper shot would help)."
+        return {"ok": True, "token": token, "quality": q, "quality_label": grade,
+                "thumb": base64.b64encode(face.thumb).decode("ascii"), "message": message}
 
-    def commit_enrollment(self, token: str, name: str) -> dict:
+    @staticmethod
+    def _quality_refusal(q: float | None, force: bool) -> dict | None:
+        """Refuse a poor sample unless the user insisted (force)."""
+        if force or quality_label(q) != "poor":
+            return None
+        return {"ok": False, "needs_confirm": True, "quality": q, "quality_label": "poor",
+                "message": "This face is too blurry or small to recognize reliably, and "
+                           "bad samples make recognition worse for everyone. Use a "
+                           "sharper shot, or choose Save anyway."}
+
+    def commit_enrollment(self, token: str, name: str, force: bool = False) -> dict:
         name = (name or "").strip()
         if not name:
             return {"ok": False, "message": "Enter a name to save this face."}
         with self._lock:
-            pending = self._pending.pop(token, None)
+            pending = self._pending.get(token)
+            refusal = self._quality_refusal(pending["quality"], force) if pending else None
+            if pending and not refusal:
+                self._pending.pop(token, None)
         if not pending:
             return {"ok": False, "message": "That capture expired. Capture the face again."}
-        samples = self.db.add(name, pending["emb"], pending["thumb"])
+        if refusal:
+            return refusal                 # the capture stays staged for "Save anyway"
+        samples = self.db.add(name, pending["emb"], pending["thumb"], quality=pending["quality"])
         self._announce_people()
         word = "sample" if samples == 1 else "samples"
         return {"ok": True, "message": f"Saved {name} ({samples} {word})."}
@@ -423,7 +462,7 @@ class App:
             self._pending.pop(token, None)
         return {"ok": True}
 
-    def name_sighting(self, sighting_id: str, name: str) -> dict:
+    def name_sighting(self, sighting_id: str, name: str, force: bool = False) -> dict:
         """Enroll an unknown face straight from the log entry that captured it."""
         name = (name or "").strip()
         if not name:
@@ -439,11 +478,55 @@ class App:
         if emb.size == 0:
             return {"ok": False, "message": "That sighting has no usable face data."}
         thumb = base64.b64decode(event["thumb"]) if event.get("thumb") else b""
-        samples = self.db.add(name, emb, thumb)
+        q = self.quality.score_thumb(thumb)
+        refusal = self._quality_refusal(q, force)
+        if refusal:
+            return refusal
+        samples = self.db.add(name, emb, thumb, quality=q)
         self.reclog.relabel(sighting_id, name)
         self._announce_people()
         word = "sample" if samples == 1 else "samples"
         return {"ok": True, "message": f"Saved {name} ({samples} {word})."}
+
+    # ---- the face library: one person's individual samples ----------------
+    def person_samples(self, name: str) -> dict:
+        samples = self.db.samples((name or "").strip())
+        if samples is None:
+            return {"ok": False, "message": f"{name} not found."}
+        for smp in samples:
+            if smp["quality"] is None and smp["thumb"]:
+                smp["quality"] = self.quality.score_thumb(base64.b64decode(smp["thumb"]))
+            smp["quality_label"] = quality_label(smp["quality"])
+        return {"ok": True, "name": name, "samples": samples,
+                "threshold": self.opts.recognition_threshold}
+
+    def _after_library_change(self, *names: str) -> None:
+        """Re-announce people; take anyone left with no samples out of HA."""
+        slugs = dict(self._person_slugs)
+        self._announce_people()
+        for name in names:
+            if name and self.db.kind(name) is None:
+                self._seen.pop(name, None)
+                if slugs.get(name) and self.mqtt:
+                    self.mqtt.clear_person(slugs[name])
+
+    def delete_sample(self, name: str, sample_id: str) -> dict:
+        name = (name or "").strip()
+        left = self.db.delete_sample(name, sample_id)
+        if left is None:
+            return {"ok": False, "message": "That sample no longer exists - refresh and try again."}
+        self._after_library_change(name)
+        if left == 0:
+            return {"ok": True, "left": 0, "message": f"Removed the last sample - {name} is gone."}
+        word = "sample" if left == 1 else "samples"
+        return {"ok": True, "left": left, "message": f"Removed. {name} has {left} {word} left."}
+
+    def move_sample(self, name: str, sample_id: str, to: str) -> dict:
+        name, to = (name or "").strip(), (to or "").strip()
+        ok, message = self.db.move_sample(name, sample_id, to)
+        if ok:
+            self._after_library_change(name, to)
+        return {"ok": ok, "message": message}
 
     def delete_person(self, name: str) -> dict:
         name = (name or "").strip()

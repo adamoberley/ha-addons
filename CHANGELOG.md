@@ -1,5 +1,13 @@
 # Changelog
 
+## Local Faces 0.9.0 — 2026-09-30
+
+**A face library for every person** (#24): see each saved face, with the blurry
+ones and the ones that don't match flagged, and remove or reassign a single
+sample instead of deleting the person. Blurry captures are caught by a small
+face-quality model before they're enrolled, and presence sensors gain a plain
+`person` attribute and timezone-aware timestamps.
+
 ## Local Faces 0.8.0 — 2026-09-30
 
 **Use your Home Assistant cameras, and only look when something happens.** A

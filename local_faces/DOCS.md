@@ -17,8 +17,18 @@ an optional push notification (and only if you turn one on).
   — a MobileFaceNet-style embedding model (~37 MB) that turns each face into a
   128-D vector; faces are matched by cosine similarity.
 
-Both are Apache-2.0 models from the OpenCV Zoo, run through OpenCV's bundled DNN
-engine on the CPU. They're downloaded once to `/data/models` on first start.
+- **Face quality:** [eDifFIQA(T)](https://github.com/opencv/opencv_zoo/tree/main/models/face_image_quality_assessment_ediffiqa)
+  (~7 MB) scores how useful a face is for recognition, so blurry or tiny
+  samples are caught before they're enrolled. Only used when enrolling and in
+  the face library, never on the live recognition path.
+
+All three come from the OpenCV Zoo — YuNet under MIT, SFace under Apache-2.0,
+eDifFIQA(T) under CC-BY-4.0 (Babnik et al., *eDifFIQA: Towards Efficient Face
+Image Quality Assessment based on Denoising Diffusion Probabilistic Models*,
+IEEE T-BIOM 2024) — and run through OpenCV's bundled DNN engine on the CPU.
+They're downloaded once to `/data/models` on first start; if the quality model
+can't be fetched, everything else still works, just without the blurry-sample
+check.
 This is the open-source counterpart to the UltraFace + MobileFaceNet pairing —
 small, fast, and accurate enough for a front door or hallway. Placement and good
 enrollment photos matter more than the model.
@@ -163,6 +173,32 @@ looking all the time — a missed trigger should never mean a missed face.
 A camera without trigger entities behaves exactly as before: analyzed every
 **Detection interval**.
 
+## The face library
+
+Hit **Samples** next to anyone under *Known people* to see every face saved for
+them. The list tells you when someone has samples worth a look ("*2 look off*").
+
+- **Red = worth removing.** A sample is flagged when it's **blurry** (the
+  quality model rates it poor) or when it **doesn't match** the rest of that
+  person's samples — it wouldn't pass the match threshold against their average.
+  That second check catches the worst case: someone else's face saved under
+  this name, which makes both people harder to recognize. It needs three or
+  more samples to judge.
+- **Tap a sample, then Remove or Move.** Move reassigns it to whoever it really
+  is (a new name creates that person). Removing a person's last sample removes
+  the person, and their Home Assistant entity with them.
+- Each sample shows how well it matches the others; the more consistent a
+  person's samples, the more reliably they're recognized.
+- Samples saved before 0.9 show *no preview* — the app never kept which picture
+  each one came from — but they're still judged, moved and removed normally.
+
+**Blurry captures are caught at the door.** When you enroll a face (Capture,
+Upload, or naming a sighting), it's scored first. A *poor* one is refused with
+an explanation and a **Save anyway** button, because one bad sample makes
+recognition worse for everyone; a *fair* one is saved with a heads-up. What
+matters is the size and sharpness of the *face*, not the whole photo — a
+distant face is always softer than a close one.
+
 ## Ignoring faces that aren't people
 
 A camera pointed at a room often sees faces that never move: the people printed
@@ -198,6 +234,11 @@ Notes:
   are not restored (they're gone from the log).
 - Entries are stored per recognition model, like enrollments, in
   `/data/faces.json`. Nothing leaves the box.
+- **Are ignored faces still analyzed?** Yes, and they have to be: an ignored
+  face is recognized like any other, and *then* dropped — that's how it keeps
+  being ignored. A blurry face you don't want doesn't need to be ignored at all,
+  though: just don't name it. Unnamed sightings aren't matched against anything
+  and simply age out of the log.
 
 ## "Probably not a person"
 
@@ -230,6 +271,7 @@ person being recognized too.
 | Distant false detections | Raise **Minimum face size** |
 | Notified too often | Raise **Re-trigger cooldown** |
 | A poster / TV / photo keeps being logged | **Ignore** that sighting (see above) |
+| Someone is recognized unreliably | Open their **Samples**, remove the red ones, add a few sharp shots |
 | Someone stays "present" too long after leaving | Lower **Presence timeout** |
 | Someone flickers between present and away | Raise **Presence timeout** |
 
