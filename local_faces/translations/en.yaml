@@ -107,6 +107,15 @@ configuration:
       (name, known, score, camera, camera_entity), so automations can react to a
       specific person at a specific camera - e.g. add "Kenzie is at the door" to
       a doorbell notification.
+  confirm_frames:
+    name: Frames to confirm a face
+    description: >-
+      Only report someone once they have matched in this many of the camera's
+      last few frames (2 = two of the last three), with the score averaged
+      across them. One stray frame - a half-turned face, motion blur, a
+      stranger who lands just over the threshold - is then never enough to log,
+      notify or mark someone present. 1 reports on the first frame (faster,
+      more false matches). Costs one extra frame of delay per extra frame.
   enable_mqtt:
     name: Publish HA sensor (MQTT)
     description: >-

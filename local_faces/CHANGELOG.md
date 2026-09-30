@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.10.0 — 2026-09-30
+
+- **A face is confirmed across frames before it's reported.** Like Frigate,
+  someone is only logged, notified, marked present or sent to Home Assistant
+  once they've matched in two of the camera's last three frames (**Frames to
+  confirm a face**, default 2), and with the score averaged over those frames,
+  weighted toward the larger faces. One stray frame — a half-turned face,
+  motion blur, a stranger just over the threshold — is no longer enough.
+  Unknown faces need confirming too, which keeps one-frame blurs out of the
+  log. The live view boxes a face in amber as *checking…* until it's
+  confirmed. It counts frames rather than seconds, so it works the same at any
+  detection interval, and costs one extra frame of delay (half a second on a
+  triggered doorbell). Set it to 1 for the old first-frame behavior.
+
 ## 0.9.0 — 2026-09-30
 
 - **A face library for every person** (#24). **Samples** next to anyone under

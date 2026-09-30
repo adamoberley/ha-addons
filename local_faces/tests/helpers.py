@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import threading
 
+import confirm as confirm_mod
 import engine as engine_mod
 import hass as hass_mod
 import main as main_mod
@@ -131,6 +132,9 @@ def make_options(**overrides) -> options_mod.Options:
         cooldown_seconds=0, notify_service="notify.test", notify_unknown=True,
         person_sensors=True, presence_timeout_seconds=120,
         active_interval=0.5, trigger_hold_seconds=10, fire_events=True,
+        # Single-frame by default so each test's one tick() is decisive;
+        # test_confirm.py covers confirmation across frames.
+        confirm_frames=1,
         enable_mqtt=True, mqtt_host="", mqtt_port=1883, mqtt_username="",
         mqtt_password="", log_level="info",
     )
@@ -164,6 +168,7 @@ def make_app(db, log, faces=(), cameras=("arcade",), statics=None, triggers=None
     app.triggers.connected = True          # as if the websocket were up
     app.events = FakeEvents()
     app.quality = FakeQuality()
+    app.confirmer = confirm_mod.FrameConfirmer(app.opts.confirm_frames)
     app.httpd = None
     app.running = True
     app._lock = threading.Lock()

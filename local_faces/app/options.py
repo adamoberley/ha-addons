@@ -70,6 +70,7 @@ class Options:
     active_interval: float
     trigger_hold_seconds: int
     fire_events: bool
+    confirm_frames: int
     enable_mqtt: bool
     mqtt_host: str
     mqtt_port: int
@@ -141,6 +142,7 @@ def load() -> Options:
         active_interval=float(raw.get("active_interval", 0.5)),
         trigger_hold_seconds=int(raw.get("trigger_hold_seconds", 10)),
         fire_events=bool(raw.get("fire_events", True)),
+        confirm_frames=max(1, int(raw.get("confirm_frames", 2))),
         enable_mqtt=bool(raw.get("enable_mqtt", True)),
         mqtt_host=str(raw.get("mqtt_host", "")).strip(),
         mqtt_port=int(raw.get("mqtt_port", 1883)),
