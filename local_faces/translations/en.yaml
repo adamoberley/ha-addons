@@ -3,9 +3,13 @@ configuration:
   cameras:
     name: Cameras
     description: >-
-      One entry per camera (name, stream URL, and mode). Leave empty to use the
-      single Camera URL below. Enrollments are shared across every camera, and
-      each camera gets its own "Recognized Name" sensor in Home Assistant.
+      One entry per camera. The simplest is a name plus camera_entity - a Home
+      Assistant camera like camera.front_porch, which needs no URL or password.
+      Or give a stream_url (RTSP/HTTP) and camera_mode instead. Add
+      trigger_entities (comma-separated, e.g. the doorbell's person sensor) and
+      the camera is only looked at while one of them is on - no CPU the rest of
+      the time. Enrollments are shared across every camera, and each camera gets
+      its own "Recognized Name" sensor in Home Assistant.
   stream_url:
     name: Camera URL
     description: >-
@@ -85,6 +89,24 @@ configuration:
       How long a person stays "present" after their last sighting before their
       sensor turns off (10-3600 s). Longer rides out someone walking out of
       frame; shorter reacts faster when they leave.
+  active_interval:
+    name: Interval while triggered (seconds)
+    description: >-
+      How often a camera with trigger entities is analyzed while one of them is
+      on (0.5 s = twice a second). Cameras without triggers use the Detection
+      interval instead.
+  trigger_hold_seconds:
+    name: Keep looking after a trigger (seconds)
+    description: >-
+      Keep analyzing a camera for this long after its last trigger turns off.
+      Person sensors often drop while someone is still standing at the door.
+  fire_events:
+    name: Fire recognition events
+    description: >-
+      Fire a local_faces_recognized event in Home Assistant for every sighting
+      (name, known, score, camera, camera_entity), so automations can react to a
+      specific person at a specific camera - e.g. add "Kenzie is at the door" to
+      a doorbell notification.
   enable_mqtt:
     name: Publish HA sensor (MQTT)
     description: >-

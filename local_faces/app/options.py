@@ -15,6 +15,29 @@ class Camera:
     slug: str
     stream_url: str
     camera_mode: str
+    # A Home Assistant camera entity to read instead of stream_url (no password
+    # in the options), and the entities that gate recognition - it only runs
+    # while one of them is on. Empty triggers = always on, as before 0.8.
+    camera_entity: str = ""
+    triggers: tuple = ()
+
+    @property
+    def source_kind(self) -> str:
+        return "ha" if self.camera_entity else self.camera_mode
+
+
+def _entity_list(value) -> tuple:
+    """Trigger entities from a comma/space/newline-separated string or a list."""
+    if isinstance(value, (list, tuple)):
+        parts = [str(v) for v in value]
+    else:
+        parts = re.split(r"[\s,]+", str(value or ""))
+    out: list[str] = []
+    for part in parts:
+        part = part.strip()
+        if part and "." in part and part not in out:
+            out.append(part)
+    return tuple(out)
 
 
 def _slugify(name: str) -> str:
@@ -44,6 +67,9 @@ class Options:
     notify_unknown: bool
     person_sensors: bool
     presence_timeout_seconds: int
+    active_interval: float
+    trigger_hold_seconds: int
+    fire_events: bool
     enable_mqtt: bool
     mqtt_host: str
     mqtt_port: int
@@ -72,8 +98,10 @@ def _cameras(raw: dict) -> tuple:
     are none, fall back to the legacy single stream_url so older configs still work."""
     out, seen = [], set()
     for c in (raw.get("cameras") or []):
-        url = str((c or {}).get("stream_url", "")).strip()
-        if not url:
+        c = c or {}
+        url = str(c.get("stream_url", "") or "").strip()
+        entity = str(c.get("camera_entity", "") or "").strip()
+        if not url and not entity:
             continue
         name = str(c.get("name", "")).strip() or "Camera"
         slug = base = _slugify(name)
@@ -82,7 +110,8 @@ def _cameras(raw: dict) -> tuple:
             slug, n = f"{base}_{n}", n + 1
         seen.add(slug)
         mode = str(c.get("camera_mode", "stream")).strip() or "stream"
-        out.append(Camera(name, slug, url, mode))
+        out.append(Camera(name, slug, url, mode, camera_entity=entity,
+                          triggers=_entity_list(c.get("trigger_entities"))))
     if not out:
         url = str(raw.get("stream_url", "")).strip()
         if url:
@@ -109,6 +138,9 @@ def load() -> Options:
         notify_unknown=bool(raw.get("notify_unknown", True)),
         person_sensors=bool(raw.get("person_sensors", True)),
         presence_timeout_seconds=int(raw.get("presence_timeout_seconds", 120)),
+        active_interval=float(raw.get("active_interval", 0.5)),
+        trigger_hold_seconds=int(raw.get("trigger_hold_seconds", 10)),
+        fire_events=bool(raw.get("fire_events", True)),
         enable_mqtt=bool(raw.get("enable_mqtt", True)),
         mqtt_host=str(raw.get("mqtt_host", "")).strip(),
         mqtt_port=int(raw.get("mqtt_port", 1883)),

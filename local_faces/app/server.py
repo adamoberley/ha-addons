@@ -78,6 +78,7 @@ PAGE = b"""<!doctype html>
   .cam.unknown::before { border-top-color:var(--error); }
   .cam img { width:100%; height:100%; object-fit:contain; display:block; }
   .cam.offline img { opacity:.25; }
+  .cam.idle img { opacity:.35; filter:grayscale(1); }
   .cam .cap { position:absolute; top:10px; right:10px; z-index:5; font:inherit;
               font-size:13px; font-weight:500; padding:6px 12px; border-radius:8px;
               border:0; background:rgba(0,0,0,.55); color:#fff; cursor:pointer; }
@@ -365,14 +366,21 @@ PAGE = b"""<!doctype html>
       if(s.aspect) aspectMode=s.aspect;
       var cams=s.cameras||[];
       el("emptyCams").style.display = cams.length ? "none" : "";
-      var anyOk=false, anyKnown=false, anyUnknown=false;
+      var anyOk=false, anyKnown=false, anyUnknown=false, anyIdle=false;
       cams.forEach(function(c){
         var t=ensureTile(c);
         if(aspectMode!=="auto") t.root.style.aspectRatio=aspectMode.replace(":"," / ");
-        t.root.classList.toggle("known", c.state==="known");
-        t.root.classList.toggle("unknown", c.state==="unknown");
-        t.root.classList.toggle("offline", !c.camera_ok);
-        if(c.state==="known" && c.recognized) t.who.textContent=c.recognized+"  "+pct(c.score);
+        // A trigger-gated camera with nothing happening isn't broken, it's resting.
+        var idle=c.watching===false;
+        t.root.classList.toggle("idle", idle);
+        t.root.classList.toggle("known", !idle && c.state==="known");
+        t.root.classList.toggle("unknown", !idle && c.state==="unknown");
+        t.root.classList.toggle("offline", !idle && !c.camera_ok);
+        var trig=c.triggers||[];
+        t.root.title = trig.length ? "Looks only while on: "+trig.join(", ") : "";
+        anyIdle=anyIdle||idle;
+        if(idle) t.who.textContent="idle, waiting for "+(trig.length===1?"its trigger":"a trigger");
+        else if(c.state==="known" && c.recognized) t.who.textContent=c.recognized+"  "+pct(c.score);
         else if(c.state==="unknown") t.who.textContent="Unknown";
         else if(c.camera_ok) t.who.textContent=c.faces+(c.faces===1?" face":" faces")
           +(c.ignored?" (+"+c.ignored+" ignored)":"");
@@ -384,7 +392,8 @@ PAGE = b"""<!doctype html>
       });
       var pill=el("pill");
       pill.className="pill"+(anyUnknown?" alert":(anyOk?" live":""));
-      el("pillText").textContent = cams.length ? (anyOk?"Live":"No signal") : "Set up cameras";
+      el("pillText").textContent = !cams.length ? "Set up cameras"
+        : (anyOk ? "Live" : (anyIdle ? "Idle" : "No signal"));
     }).catch(function(){});
   }
 

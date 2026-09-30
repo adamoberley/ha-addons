@@ -6,7 +6,7 @@
 # HA as a sensor over MQTT; recognition, enrollment, and the log never leave the
 # box (only an optional push notification does).
 name: Local Faces
-version: "0.7.1"
+version: "0.8.0"
 slug: local_faces
 description: >-
   On-device, open-source face recognition. Enroll people from a dashboard;
@@ -51,6 +51,9 @@ options:
   notify_unknown: true
   person_sensors: true
   presence_timeout_seconds: 120
+  active_interval: 0.5
+  trigger_hold_seconds: 10
+  fire_events: true
   enable_mqtt: true
   mqtt_host: ""
   mqtt_port: 1883
@@ -63,8 +66,14 @@ schema:
   # of them and each gets its own sensor. Leave empty to use the single Camera URL.
   cameras:
     - name: str
-      stream_url: str
-      camera_mode: "list(stream|snapshot)"
+      # A Home Assistant camera entity (camera.front_porch). Needs no URL or
+      # password; used instead of stream_url when set.
+      camera_entity: "str?"
+      stream_url: "str?"
+      camera_mode: "list(stream|snapshot)?"
+      # Only look while one of these is on - e.g. the doorbell's person sensor,
+      # a motion sensor. Comma-separated. Blank = always look (as before).
+      trigger_entities: "str?"
   # Camera URL. RTSP (rtsp://user:pass@cam/stream) or an HTTP/MJPEG stream for
   # "stream" mode; a still-image snapshot URL for "snapshot" mode. Single-camera
   # fallback, used only when no cameras are listed above.
@@ -98,6 +107,13 @@ schema:
   person_sensors: "bool"
   # How long a person stays "present" after their last sighting.
   presence_timeout_seconds: "int(10,3600)"
+  # Seconds between frames while a camera's triggers are on (vs detect_interval
+  # for cameras without triggers).
+  active_interval: "float(0.2,10)"
+  # Keep looking this long after the last trigger turns off.
+  trigger_hold_seconds: "int(0,600)"
+  # Fire a local_faces_recognized event in HA for every sighting.
+  fire_events: "bool"
   # Publish the "Recognized Name" sensor over MQTT.
   enable_mqtt: "bool"
   # Leave MQTT fields blank to auto-detect the Mosquitto broker app; or set

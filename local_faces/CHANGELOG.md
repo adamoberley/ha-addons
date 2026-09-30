@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.8.0 — 2026-09-30
+
+- **Use your Home Assistant cameras.** A camera can now be just a name plus
+  `camera_entity: camera.front_porch` — Local Faces reads the same still the HA
+  UI shows, through Home Assistant itself, so there's no RTSP URL and no camera
+  password in the app's options anymore. RTSP/HTTP cameras still work as before.
+- **Only look when something happens.** Give a camera `trigger_entities` (a
+  doorbell's person sensor, a motion sensor) and it's only fetched and analyzed
+  while one of them is on — nothing at all the rest of the time. Recognition
+  starts within milliseconds of the trigger (the app follows the entities over
+  Home Assistant's websocket), runs every **Interval while triggered** (0.5 s),
+  and keeps going for **Keep looking after a trigger** (10 s) once it drops. A
+  stream camera with triggers is also closed after a minute idle, since decoding
+  a stream nobody analyzes was the biggest idle cost. If Home Assistant can't be
+  reached, gated cameras keep looking instead of going blind.
+- **A `local_faces_recognized` event** in Home Assistant for every sighting —
+  name, known, score, camera and camera entity — so an automation can react to a
+  specific person at a specific camera, Frigate-style, without templates.
+- The dashboard shows a resting camera as *idle, waiting for its trigger*
+  instead of looking offline.
+
 ## 0.7.1 — 2026-09-30
 
 - **Fixes the crash on start in 0.7.0** (`'MqttPublisher' object has no attribute

@@ -3,14 +3,19 @@
 options.json -> pull frames from one or more cameras -> detect faces (YuNet) and
 match them to enrolled people (SFace), all on CPU. Cameras are processed
 round-robin, so total CPU stays flat as you add cameras (each is analyzed every
-detect_interval x camera-count). Every camera exposes its own "Recognized Name"
-sensor to Home Assistant over MQTT (plus an aggregate), optionally pushes a phone
-notification, and logs sightings with a snapshot in the ingress dashboard where
-you enroll faces. Faces that aren't people - the ones printed on a poster, a
-photo frame, or an arcade cabinet - can be added to an *ignore* list from the
-same dashboard; they still get matched, then dropped before anything is logged,
-published or notified. Recognition, enrollment, and the log stay local; only a
-notification can leave your network.
+detect_interval x camera-count). A camera can be a Home Assistant camera entity
+(no RTSP password in the options) and can be gated by trigger entities - a
+doorbell's person sensor, a motion sensor - so it's only fetched and analyzed
+while something is actually happening; the rest of the time it costs nothing.
+Each recognition also fires a ``local_faces_recognized`` event in HA. Every
+camera exposes its own "Recognized Name" sensor to Home Assistant over MQTT
+(plus an aggregate), optionally pushes a phone notification, and logs sightings
+with a snapshot in the ingress dashboard where you enroll faces. Faces that
+aren't people - the ones printed on a poster, a photo frame, or an arcade
+cabinet - can be added to an *ignore* list from the same dashboard; they still
+get matched, then dropped before anything is logged, published or notified.
+Recognition, enrollment, and the log stay local; only a notification can leave
+your network.
 """
 from __future__ import annotations
 
@@ -26,9 +31,10 @@ import cv2
 import numpy as np
 import options as options_mod
 import server
-from camera import CameraSource
+from camera import CameraSource, HaCameraSource
 from engine import FaceEngine
 from facedb import FaceDB
+from hass import EventSender, HaClient, TriggerWatcher
 from mqtt_pub import MqttPublisher
 from notify import Notifier
 from reclog import RecognitionLog
@@ -63,10 +69,14 @@ class App:
         self.engine = FaceEngine(opts)
         self.db = FaceDB(opts.recognition_threshold, opts.recognition_model)
         self.reclog = RecognitionLog()
-        self.sources = {
-            c.slug: CameraSource(c.stream_url, c.camera_mode, opts.detect_interval)
-            for c in self.cameras
-        }
+        self.ha = HaClient()
+        self.sources = {c.slug: self._make_source(c) for c in self.cameras}
+        # Set when a trigger changes (or on shutdown) so the loop reacts now,
+        # not at the end of its current wait.
+        self.wake = threading.Event()
+        self.triggers = TriggerWatcher([t for c in self.cameras for t in c.triggers],
+                                       on_change=self.wake.set)
+        self.events = EventSender(self.ha, opts.fire_events)
         self.mqtt = MqttPublisher(opts, self.cameras) if opts.enable_mqtt else None
         self.notifier = Notifier(opts)
         self.statics = StaticWatcher(opts.recognition_threshold, opts.recognition_model)
@@ -83,16 +93,24 @@ class App:
         self._person_slugs: dict[str, str] = {}       # name -> HA entity slug
         self._rr = 0                                  # round-robin cursor
 
+    def _make_source(self, cam):
+        if cam.camera_entity:
+            return HaCameraSource(self.ha, cam.camera_entity, self.opts.detect_interval)
+        return CameraSource(cam.stream_url, cam.camera_mode, self.opts.detect_interval)
+
     @staticmethod
     def _blank(cam) -> dict:
         return {"slug": cam.slug, "name": cam.name, "camera_ok": False, "faces": 0,
                 "ignored": 0, "recognized": "", "score": 0.0, "state": "idle",
-                "last_ts": 0.0}
+                "last_ts": 0.0, "watching": True,
+                "source": getattr(cam, "source_kind", "stream"),
+                "triggers": list(getattr(cam, "triggers", ()))}
 
     # ---- lifecycle ---------------------------------------------------------
     def start(self) -> None:
         for src in self.sources.values():
             src.start()
+        self.triggers.start()
         if self.mqtt:
             self.mqtt.start()
             self._announce_people()
@@ -102,6 +120,8 @@ class App:
 
     def stop(self) -> None:
         self.running = False
+        self.wake.set()
+        self.triggers.stop()
         for src in self.sources.values():
             src.stop()
         if self.mqtt:
@@ -109,12 +129,64 @@ class App:
         if self.httpd:
             self.httpd.shutdown()
 
-    # ---- recognition loop (round-robin: one camera per tick) ---------------
+    # ---- recognition loop (round-robin over the cameras worth looking at) --
+    def camera_active(self, cam) -> bool:
+        """Whether a camera should be analyzed right now.
+
+        A camera with no trigger entities is always active (the pre-0.8
+        behavior). One with triggers is active while any of them is on, and for
+        ``trigger_hold_seconds`` after the last one turns off - a person sensor
+        often drops while someone is still standing at the door.
+        """
+        triggers = getattr(cam, "triggers", ())
+        if not triggers:
+            return True
+        hold = self.opts.trigger_hold_seconds
+        now = time.time()
+        return any(self.triggers.is_on(t) or now - self.triggers.last_on(t) < hold
+                   for t in triggers)
+
+    def active_cameras(self) -> list:
+        """Refresh every camera's active flag (pausing idle sources); return the active."""
+        active = []
+        for cam in self.cameras:
+            on = self.camera_active(cam)
+            st = self._status[cam.slug]
+            if st.get("watching") != on:
+                if getattr(cam, "triggers", ()):
+                    log.info("%s: %s", cam.name, "triggered - looking" if on
+                             else "idle - waiting for " + ", ".join(cam.triggers))
+                st["watching"] = on
+                if not on:
+                    st.update(faces=0, ignored=0, recognized="", score=0.0, state="idle")
+            src = self.sources.get(cam.slug)
+            if src is not None and hasattr(src, "set_active"):
+                src.set_active(on)
+            if on:
+                active.append(cam)
+        return active
+
+    def next_wait(self, active=None) -> float:
+        """Seconds until the next tick: faster while a triggered camera is active."""
+        active = self.active_cameras() if active is None else active
+        if any(getattr(c, "triggers", ()) for c in active):
+            wait = min(self.opts.detect_interval, self.opts.active_interval)
+        else:
+            wait = self.opts.detect_interval
+        # A snapshot source only needs a frame as often as its camera comes up.
+        per_camera = wait * max(1, len(active))
+        for cam in active:
+            src = self.sources.get(cam.slug)
+            if hasattr(src, "set_interval"):
+                src.set_interval(per_camera)
+        return wait
+
     def tick(self) -> None:
         self._expire_presence()      # runs even when nothing is detected
-        if not self.cameras:
+        active = self.active_cameras()
+        if not active:
             return
-        cam = self.cameras[self._rr % len(self.cameras)]
+        cam = active[self._rr % len(active)]
         self._rr += 1
         self._process(cam)
 
@@ -178,6 +250,15 @@ class App:
         self.reclog.add(name or "Unknown", score, unknown, face.thumb, face.embedding,
                         self.opts.recognition_model, camera=cam.name)
         log.info("event[%s]: %s (score=%.3f)", cam.slug, name or "unknown", score)
+        self.events.send({
+            "name": name,                       # None for an unknown face
+            "known": not unknown,
+            "score": round(float(score), 3),
+            "camera": cam.name,
+            "camera_slug": cam.slug,
+            "camera_entity": getattr(cam, "camera_entity", "") or None,
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        })
         if unknown and not self.opts.notify_unknown:
             return
         if name:
@@ -451,23 +532,32 @@ class App:
 def main() -> int:
     opts = options_mod.load()
     _setup_logging(opts.log_level)
-    signal.signal(signal.SIGTERM, _handle_signal)
-    signal.signal(signal.SIGINT, _handle_signal)
 
     app = App(opts)
+    # Also wake the loop, which may be mid-wait for up to detect_interval.
+    signal.signal(signal.SIGTERM, lambda s, f: (_handle_signal(s, f), app.wake.set()))
+    signal.signal(signal.SIGINT, lambda s, f: (_handle_signal(s, f), app.wake.set()))
     app.start()
-    cams = ", ".join(c.slug for c in app.cameras) or "none - configure cameras"
-    log.info("ready: %d camera(s) [%s], mode=%s, threshold=%.3f, every %.1fs/camera",
-             len(app.cameras), cams, opts.mode, opts.recognition_threshold, opts.detect_interval)
+    cams = ", ".join(
+        f"{c.slug} ({c.source_kind}{', on ' + '/'.join(c.triggers) if c.triggers else ''})"
+        for c in app.cameras) or "none - configure cameras"
+    log.info("ready: %d camera(s) [%s], mode=%s, threshold=%.3f, every %.1fs "
+             "(%.1fs while triggered)", len(app.cameras), cams, opts.mode,
+             opts.recognition_threshold, opts.detect_interval, opts.active_interval)
 
     try:
         # Round-robin: each tick processes the next camera; a restart re-reads all.
         while not _stop.is_set():
+            # Clear before the tick, not after the wait: a trigger that fires
+            # while we're processing must still cut the next wait short.
+            app.wake.clear()
             try:
                 app.tick()
+                wait = app.next_wait()
             except Exception as exc:  # one bad frame must not kill the loop
                 log.error("recognition cycle failed (will retry): %s", exc)
-            _stop.wait(timeout=opts.detect_interval)
+                wait = opts.detect_interval
+            app.wake.wait(timeout=wait)
     finally:
         app.stop()
     return 0

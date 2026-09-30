@@ -1,5 +1,14 @@
 # Changelog
 
+## Local Faces 0.8.0 — 2026-09-30
+
+**Use your Home Assistant cameras, and only look when something happens.** A
+camera can be an HA camera entity (no RTSP URL or password in the options), and
+with `trigger_entities` — the doorbell's person sensor, a motion sensor — it's
+only analyzed while one is on, starting within milliseconds and costing nothing
+the rest of the time. Every sighting also fires a `local_faces_recognized` event
+for automations.
+
 ## LedFX 1.7.3 — 2026-09-30
 
 **Audio-reactive effects work over Sendspin again** (#23): audio connected and
