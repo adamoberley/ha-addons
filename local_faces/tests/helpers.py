@@ -11,6 +11,7 @@ from __future__ import annotations
 import threading
 
 import engine as engine_mod
+import hass as hass_mod
 import main as main_mod
 import numpy as np
 import options as options_mod
@@ -28,17 +29,35 @@ def face_at(embedding: np.ndarray, x: int = 10, y: int = 10, size: int = 40):
 
 
 class FakeCamera:
-    def __init__(self, slug: str = "arcade", name: str = "Arcade"):
+    def __init__(self, slug: str = "arcade", name: str = "Arcade", triggers=(),
+                 camera_entity: str = ""):
         self.slug = slug
         self.name = name
+        self.triggers = tuple(triggers)
+        self.camera_entity = camera_entity
+        self.source_kind = "ha" if camera_entity else "stream"
+
+
+class FakeEvents:
+    """Records the local_faces_recognized events that would have been fired."""
+
+    def __init__(self):
+        self.sent: list[dict] = []
+
+    def send(self, data):
+        self.sent.append(data)
 
 
 class FakeSource:
     def __init__(self, frame):
         self._frame = frame
+        self.active = True
 
     def latest(self):
         return self._frame
+
+    def set_active(self, active):
+        self.active = active
 
 
 class FakeMqtt:
@@ -101,6 +120,7 @@ def make_options(**overrides) -> options_mod.Options:
         detect_interval=1.0, recognition_threshold=0.5, min_face_size=60,
         cooldown_seconds=0, notify_service="notify.test", notify_unknown=True,
         person_sensors=True, presence_timeout_seconds=120,
+        active_interval=0.5, trigger_hold_seconds=10, fire_events=True,
         enable_mqtt=True, mqtt_host="", mqtt_port=1883, mqtt_username="",
         mqtt_password="", log_level="info",
     )
@@ -108,11 +128,17 @@ def make_options(**overrides) -> options_mod.Options:
     return options_mod.Options(**base)
 
 
-def make_app(db, log, faces=(), cameras=("arcade",), statics=None, **opt_overrides):
-    """An App with the real pipeline and stubbed edges. Returns (app, cameras)."""
+def make_app(db, log, faces=(), cameras=("arcade",), statics=None, triggers=None,
+             **opt_overrides):
+    """An App with the real pipeline and stubbed edges. Returns (app, cameras).
+
+    ``triggers`` maps a camera slug to its trigger entities; the app gets a real
+    TriggerWatcher (never started - tests drive it with set_state()).
+    """
     app = main_mod.App.__new__(main_mod.App)
     app.opts = make_options(**opt_overrides)
-    cams = [FakeCamera(slug, slug.title()) for slug in cameras]
+    triggers = triggers or {}
+    cams = [FakeCamera(slug, slug.title(), triggers.get(slug, ())) for slug in cameras]
     app.cameras = cams
     app.engine = FakeEngine(faces)
     app.db = db
@@ -121,6 +147,12 @@ def make_app(db, log, faces=(), cameras=("arcade",), statics=None, **opt_overrid
     app.sources = {c.slug: FakeSource(np.zeros((120, 160, 3), dtype="uint8")) for c in cams}
     app.mqtt = FakeMqtt()
     app.notifier = FakeNotifier()
+    app.ha = None
+    app.wake = threading.Event()
+    app.triggers = hass_mod.TriggerWatcher([t for c in cams for t in c.triggers],
+                                           on_change=app.wake.set, token="test")
+    app.triggers.connected = True          # as if the websocket were up
+    app.events = FakeEvents()
     app.httpd = None
     app.running = True
     app._lock = threading.Lock()

@@ -59,7 +59,19 @@ model — `sface` is good at `0.363`; for `mobilefacenet_w600k` start lower (aro
 
 1. **Install an MQTT broker** (the official *Mosquitto broker* app) if you
    want the HA sensor. Local Faces auto-detects it — no broker config needed.
-2. **Set the camera URL** in the Configuration tab:
+2. **Add your camera** under **Cameras** in the Configuration tab. The easiest
+   way is a Home Assistant camera you already have — no URL, no password:
+
+   ```yaml
+   - name: Front Porch
+     camera_entity: camera.front_porch
+     trigger_entities: binary_sensor.front_porch_person
+   ```
+
+   `trigger_entities` is optional but recommended: the camera is only looked
+   at while one of them is on (see [Only look when something
+   happens](#only-look-when-something-happens)). Or give a `stream_url`
+   instead of `camera_entity`:
    - `stream` mode: an RTSP URL like `rtsp://user:pass@192.168.1.50/stream`, or
      an HTTP/MJPEG stream.
    - `snapshot` mode: a still-image URL that returns a fresh JPEG per request.
@@ -105,6 +117,19 @@ model — `sface` is good at `0.363`; for `mobilefacenet_w600k` start lower (aro
   you delete them — no restart either way. Turn the whole set off with the
   **One sensor per person** option, and tune how long someone stays "present"
   after their last sighting with **Presence timeout**.
+- **A `local_faces_recognized` event** for every sighting, like Frigate's —
+  `name` (or `null` for an unknown face), `known`, `score`, `camera`,
+  `camera_slug`, `camera_entity` and `timestamp`. Trigger on a specific person
+  at a specific camera without templates:
+
+  ```yaml
+  triggers:
+    - trigger: event
+      event_type: local_faces_recognized
+      event_data: {name: Alex, camera_entity: camera.front_porch}
+  ```
+
+  Turn it off with **Fire recognition events**.
 - **Push notification** — optional ping via any HA notify service. Sent in the
   background, so a slow notify service never holds up recognition (if one wedges,
   alerts are dropped rather than cameras stalling).
@@ -113,6 +138,30 @@ model — `sface` is good at `0.363`; for `mobilefacenet_w600k` start lower (aro
   or ignored in place if they aren't people.
 - **Ignored faces** — a second list next to *Known people*, for faces that are
   real faces but not arrivals.
+
+## Only look when something happens
+
+Most of the day nobody is at the door, and analyzing an empty doorstep twice a
+second is wasted CPU. Give a camera **trigger entities** — the doorbell's own
+person or visitor sensor, a motion sensor, a door contact — and Local Faces only
+looks while one of them is on:
+
+- **Idle:** nothing is fetched or decoded. A Home Assistant camera isn't polled
+  at all; a stream camera is closed after a minute (reopening one takes a second
+  or two, so a brief pause doesn't drop it).
+- **The moment a trigger turns on**, recognition starts — the app follows the
+  entities over Home Assistant's websocket, so there's no polling delay — and
+  runs every **Interval while triggered** (0.5 s by default).
+- **After the last trigger turns off**, it keeps looking for **Keep looking after
+  a trigger** (10 s), because person sensors often drop while someone is still
+  standing there.
+
+The dashboard shows a resting camera as *idle, waiting for its trigger* rather
+than as offline. If Home Assistant can't be reached, gated cameras fall back to
+looking all the time — a missed trigger should never mean a missed face.
+
+A camera without trigger entities behaves exactly as before: analyzed every
+**Detection interval**.
 
 ## Ignoring faces that aren't people
 
