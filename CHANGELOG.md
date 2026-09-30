@@ -1,5 +1,12 @@
 # Changelog
 
+## Local Faces 0.10.0 — 2026-09-30
+
+**Faces are confirmed across frames before they're reported**, Frigate-style:
+someone must match in two of a camera's last three frames, with the score
+averaged across them, before they're logged, notified or marked present — so a
+single bad frame can't put the wrong name on someone.
+
 ## Local Faces 0.9.0 — 2026-09-30
 
 **A face library for every person** (#24): see each saved face, with the blurry

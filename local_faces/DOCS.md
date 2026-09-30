@@ -173,6 +173,26 @@ looking all the time — a missed trigger should never mean a missed face.
 A camera without trigger entities behaves exactly as before: analyzed every
 **Detection interval**.
 
+## Confirming a face before reporting it
+
+A single frame is weak evidence. A half-turned face, a moment of motion blur,
+or a stranger who happens to land just over the match threshold for one frame
+would otherwise be enough to log a sighting, send a notification and mark
+someone present. So, like Frigate, Local Faces only reports a face once it has
+matched in **Frames to confirm a face** of the camera's last few frames — two
+of the last three by default — and reports it with the score **averaged across
+those frames**, weighted toward the larger (closer) faces.
+
+- Until then the live view boxes the face in amber as *checking…*.
+- It counts frames, not seconds, so it behaves the same whether a camera is
+  analyzed twice a second (a triggered doorbell) or every 30 seconds.
+- Unknown faces need confirming too, which keeps one-frame blurs of passers-by
+  out of the log.
+- A camera that goes idle starts its count over — a face from before the pause
+  isn't evidence for one after it.
+- Set it to `1` to report on the first frame, as before 0.10. Each extra frame
+  adds one detection interval of delay (half a second on a triggered camera).
+
 ## The face library
 
 Hit **Samples** next to anyone under *Known people* to see every face saved for
@@ -265,7 +285,7 @@ person being recognized too.
 
 | Symptom | Try |
 | --- | --- |
-| Strangers matched to someone | Raise **Match threshold** (e.g. 0.4–0.45) |
+| Strangers matched to someone | Raise **Frames to confirm a face** to 3, or **Match threshold** (e.g. 0.4–0.45) |
 | Known people missed | Lower **Match threshold**, add more enrollment samples |
 | High CPU on a Pi | Set **Speed vs accuracy** to `fast`, raise **Detection interval** |
 | Distant false detections | Raise **Minimum face size** |

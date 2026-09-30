@@ -33,6 +33,7 @@ import numpy as np
 import options as options_mod
 import server
 from camera import CameraSource, HaCameraSource
+from confirm import FrameConfirmer
 from engine import FaceEngine
 from facedb import FaceDB
 from hass import EventSender, HaClient, TriggerWatcher
@@ -91,6 +92,7 @@ class App:
         self.notifier = Notifier(opts)
         self.statics = StaticWatcher(opts.recognition_threshold, opts.recognition_model)
         self.quality = QualityScorer(ensure_quality_model())
+        self.confirmer = FrameConfirmer(opts.confirm_frames)
         self.httpd = None
 
         self.running = True
@@ -170,6 +172,7 @@ class App:
                 st["watching"] = on
                 if not on:
                     st.update(faces=0, ignored=0, recognized="", score=0.0, state="idle")
+                    self.confirmer.reset(cam.slug)     # old frames are no evidence
             src = self.sources.get(cam.slug)
             if src is not None and hasattr(src, "set_active"):
                 src.set_active(on)
@@ -210,26 +213,40 @@ class App:
         st["camera_ok"] = True
 
         faces = self.engine.detect(frame)
-        results: list[tuple] = []
-        live: list[tuple] = []          # everything except the ignored faces
-        top_name, top_score = None, 0.0
+        matches = []
         for face in faces:
             name, score = self.db.match(face.embedding)
-            ignored = self.db.is_ignored(name)
-            results.append((face, name, score, ignored))
+            matches.append((face, name, score, self.db.is_ignored(name)))
+        # One frame is weak evidence: only identities seen in enough recent
+        # frames are reported, with their score averaged over those frames.
+        verdicts = self.confirmer.observe(cam.slug, [
+            (name or UNKNOWN_KEY, score, face.h)
+            for face, name, score, ignored in matches if not ignored])
+
+        results: list[tuple] = []
+        live: list[tuple] = []          # everything except the ignored faces
+        confirmed: list[tuple] = []     # the live faces we're sure enough to report
+        top_name, top_score = None, 0.0
+        for face, name, score, ignored in matches:
             if ignored:
+                results.append((face, name, score, True))
                 continue            # a poster, a photo frame - matched, then dropped
             live.append((face, name, score))
-            if name:
-                self._mark_seen(name, cam, score)
-                if score > top_score:
-                    top_name, top_score = name, score
-            else:
+            if not name:
                 # An unknown face that never moves is probably a picture; the
                 # watcher offers it up after it has sat there long enough.
                 self.statics.observe(cam.name, (face.x, face.y, face.w, face.h),
                                      face.embedding, face.thumb)
-            self._handle_event(cam, face, name, score)
+            sure, agreed = verdicts[name or UNKNOWN_KEY]
+            results.append((face, name, agreed if sure else score, False, not sure))
+            if not sure:
+                continue            # boxed as "checking" until the next frame agrees
+            confirmed.append((face, name, agreed))
+            if name:
+                self._mark_seen(name, cam, agreed)
+                if agreed > top_score:
+                    top_name, top_score = name, agreed
+            self._handle_event(cam, face, name, agreed)
 
         annotated = self.engine.annotate(frame, results)
         ok, buf = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 80])
@@ -239,7 +256,7 @@ class App:
 
         if top_name:
             state = "known"
-        elif any(n is None for _, n, _ in live):
+        elif any(n is None for _, n, _ in confirmed):
             state = "unknown"
         else:
             state = "idle"
@@ -247,7 +264,7 @@ class App:
                   recognized=top_name or "",
                   score=round(top_score, 3) if top_name else 0.0,
                   state=state, last_ts=time.time())
-        self._publish(cam, top_name, live, top_score, ignored=len(results) - len(live))
+        self._publish(cam, top_name, confirmed, top_score, ignored=len(results) - len(live))
 
     def _handle_event(self, cam, face, name: str | None, score: float) -> None:
         """Debounce per (camera, identity), then log + (optionally) notify."""

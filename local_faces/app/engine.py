@@ -67,14 +67,20 @@ class FaceEngine:
         return out
 
     @staticmethod
-    def annotate(
-        frame: np.ndarray, results: list[tuple[Face, str | None, float, bool]]
-    ) -> np.ndarray:
-        """Box every detection: green = known, red = unknown, grey = ignored."""
+    def annotate(frame: np.ndarray, results: list[tuple]) -> np.ndarray:
+        """Box every detection: green = known, red = unknown, grey = ignored,
+        amber = still checking (not yet confirmed across frames).
+
+        Each result is ``(face, name, score, ignored)`` plus an optional
+        ``pending`` flag.
+        """
         img = frame.copy()
-        for face, name, score, ignored in results:
+        for face, name, score, ignored, *rest in results:
             known = name is not None
-            if ignored:
+            pending = bool(rest and rest[0])
+            if pending and not ignored:
+                color, label, weight = (0, 190, 255), "checking...", 1
+            elif ignored:
                 color, label, weight = (150, 150, 150), f"ignored ({name})", 1
             elif known:
                 color, label, weight = (0, 200, 0), f"{name} {score:.0%}", 2
