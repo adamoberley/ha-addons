@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.7.1 — 2026-09-30
+
+- **Fixes the crash on start in 0.7.0** (`'MqttPublisher' object has no attribute
+  'people'`, #21). With **One sensor per person** on — the default — the app
+  exited during startup, before the dashboard came up. Turning that option off
+  was a workaround; you can turn it back on now.
+- **Person sensors now actually appear after a restart.** The app announces its
+  people right as it starts connecting to MQTT, and anything sent before the
+  connection is up was silently dropped. People (and their current state) are
+  now published once the connection is established, and again after every
+  reconnect — so restarting Mosquitto no longer leaves them unavailable.
+- **A person no longer stays "present" after a restart.** If the app stopped
+  while someone was on, their sensor kept the old retained `on` until they were
+  next seen and timed out. It now starts everyone at `off`.
+
 ## 0.7.0 — 2026-09-09
 
 - **A presence sensor for every person.** `binary_sensor.local_faces_<name>` is
