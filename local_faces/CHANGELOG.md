@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.9.0 — 2026-09-30
+
+- **A face library for every person** (#24). **Samples** next to anyone under
+  *Known people* shows each saved face on its own, so one bad shot can be
+  removed — or moved to whoever it really is — without deleting the person.
+  Samples that are **blurry** or that **don't match** the rest of that person's
+  samples are outlined in red, and the people list says when someone has any
+  ("*2 look off*"). The mismatch check catches the worst case too: someone
+  else's face saved under the wrong name.
+- **Blurry faces are caught before they're enrolled.** Every capture, upload
+  and named sighting is scored by a small face-quality model (eDifFIQA(T),
+  CC-BY-4.0, ~7 MB, downloaded once). A poor one is refused with an explanation
+  and a **Save anyway** button; a fair one is saved with a heads-up. It isn't a
+  sharpness filter: in testing, sharpness rated motion blur that had ruined a
+  face as *sharper* than a harmless soft focus, while the quality model ranked
+  them the right way round. It's only used for enrollment and the library, not
+  live recognition, and if it can't be downloaded enrollment works as before.
+- **Friendlier Home Assistant attributes.** Each person's presence sensor now
+  has a `person` attribute with the plain enrolled name (the entity's friendly
+  name carries the "Local Faces" device prefix), and every timestamp —
+  `last_seen`, the camera sensors' `timestamp`, the `local_faces_recognized`
+  event — now includes its UTC offset, so templates can't misread it.
+- Samples enrolled before 0.9 keep working, show *no preview* in the library
+  (which picture they came from was never stored), and can still be judged,
+  moved and removed. The saved file stays readable by older versions.
+- Docs: YuNet's license is MIT, not Apache-2.0 as previously stated.
+
 ## 0.8.0 — 2026-09-30
 
 - **Use your Home Assistant cameras.** A camera can now be just a name plus

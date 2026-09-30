@@ -1,7 +1,8 @@
 """Ensure the detector + the chosen recognition model are present in /data.
 
-The detector (YuNet) and the default recognizer (SFace) are Apache-2.0 OpenCV
-Zoo models, fetched once to /data/models. Stronger small embedders exist
+The detector (YuNet, MIT), the default recognizer (SFace, Apache-2.0) and the
+face-quality scorer (eDifFIQA(T), CC-BY-4.0) are OpenCV Zoo models, fetched
+once to /data/models. Stronger small embedders exist
 (InsightFace's w600k MobileFaceNet, EdgeFace, ...) but their *pretrained weights*
 ship under non-commercial / research-only licenses, so we don't bundle or
 auto-download them: select one and supply the file yourself (recognition_model_url,
@@ -27,6 +28,19 @@ DETECTOR = {
         f"{_ZOO}/face_detection_yunet/face_detection_yunet_2023mar.onnx",
     ),
     "min_size": 200_000,
+}
+
+# Face image quality (eDifFIQA(T) - Babnik et al., "eDifFIQA: Towards Efficient
+# Face Image Quality Assessment based on Denoising Diffusion Probabilistic
+# Models", IEEE T-BIOM 2024; CC-BY-4.0). Scores how useful an aligned face is for
+# recognition; used to keep blurry/low-res samples out of the face library.
+QUALITY = {
+    "filename": "ediffiqa_tiny_jun2024.onnx",
+    "url": os.environ.get(
+        "MODEL_QUALITY_URL",
+        f"{_ZOO}/face_image_quality_assessment_ediffiqa/ediffiqa_tiny_jun2024.onnx",
+    ),
+    "min_size": 5_000_000,
 }
 
 # Recognition embedders. Only Apache-2.0 SFace is bundled (has a default URL);
@@ -78,6 +92,21 @@ def _ensure(spec: dict, custom_url: str = "", what: str = "") -> str:
         )
     _download(url, path, spec["min_size"])
     return path
+
+
+def ensure_quality_model() -> str | None:
+    """The quality scorer's path, or None if it can't be had.
+
+    Optional by design: without it enrollment still works, just without the
+    blurry-sample warning - never worth refusing to start over.
+    """
+    os.makedirs(MODELS_DIR, exist_ok=True)
+    try:
+        return _ensure(QUALITY, what="face quality")
+    except (OSError, RuntimeError, requests.RequestException) as exc:
+        log.warning("face quality scoring unavailable (%s) - enrollment works, "
+                    "but blurry samples won't be flagged", exc)
+        return None
 
 
 def ensure_models(opts) -> tuple[str, str]:

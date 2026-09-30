@@ -182,6 +182,22 @@ PAGE = b"""<!doctype html>
   .modal-meta { text-align:center; font-size:13px; color:var(--secondary);
                 margin-bottom:16px; }
   .modal .btns { margin-top:14px; }
+  .lib-card { max-width:560px; }
+  .lib-grid { display:grid; gap:10px; grid-template-columns:repeat(auto-fill, minmax(96px,1fr));
+              max-height:52vh; overflow:auto; margin:12px 0 4px; padding:2px; }
+  .smp { position:relative; border:2px solid transparent; border-radius:10px; padding:4px;
+         background:var(--field); cursor:pointer; text-align:center; font:inherit; color:inherit; }
+  .smp.sel { border-color:var(--primary); }
+  .smp img, .smp .noimg { width:100%; aspect-ratio:1; border-radius:6px; object-fit:cover;
+                          display:block; background:var(--screen); }
+  .smp .noimg { display:flex; align-items:center; justify-content:center; font-size:11px;
+                color:var(--secondary); }
+  .smp .cap { font-size:11px; color:var(--secondary); margin-top:4px; line-height:1.3; }
+  .smp.flag img, .smp.flag .noimg { outline:2px solid var(--error); outline-offset:-2px; }
+  .smp .tag { display:inline-block; font-size:10px; padding:1px 5px; border-radius:6px;
+              margin:2px 1px 0; background:var(--card); }
+  .smp .tag.bad { color:var(--error); }
+  .smp .tag.meh { color:var(--secondary); }
   .modal .btns button { flex:1; text-align:center; }
 
   @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:.35;} }
@@ -277,6 +293,26 @@ PAGE = b"""<!doctype html>
 
 <datalist id="names"></datalist>
 
+<div class="modal" id="lib" hidden>
+  <div class="modal-card lib-card">
+    <button class="modal-x" id="libX" aria-label="Close">&times;</button>
+    <h2 id="libTitle" style="margin:0 36px 4px 0">Samples</h2>
+    <p class="lead" style="margin:0">Every face saved for this person. Red ones are
+       blurry or don't match the rest - a bad sample makes recognition worse, so
+       remove it or move it to whoever it really is. Tap a sample to select it.</p>
+    <div class="lib-grid" id="libGrid"></div>
+    <div class="field">
+      <label class="lbl" for="libTo">Move selected to</label>
+      <input type="text" id="libTo" list="names" placeholder="Name" autocomplete="off">
+    </div>
+    <div class="btns">
+      <button class="btn-ghost" id="libMove" disabled>Move</button>
+      <button class="btn-ghost" id="libDel" disabled>Remove</button>
+    </div>
+    <div class="msg" id="libMsg" aria-live="polite">&nbsp;</div>
+  </div>
+</div>
+
 <div class="modal" id="modal" hidden>
   <div class="modal-card">
     <button class="modal-x" id="modalX" aria-label="Close">&times;</button>
@@ -301,7 +337,7 @@ PAGE = b"""<!doctype html>
 
 <script>
 (function(){
-  var pendingToken = null, aspectMode = "auto";
+  var pendingToken = null, aspectMode = "auto", forceSave = false;
   var tiles = {};   // slug -> { root, img, who }
 
   function el(id){ return document.getElementById(id); }
@@ -437,8 +473,13 @@ PAGE = b"""<!doctype html>
         } else {
           bits.push("not seen yet");
         }
+        if(p.flagged) bits.push(p.flagged+(p.flagged===1?" looks off":" look off"));
         meta.textContent=bits.join(" \\u00b7 ");   // a middot, escaped for JS
         col.appendChild(nm); col.appendChild(meta); li.appendChild(col);
+        var lib=document.createElement("button"); lib.className="link";
+        lib.textContent="Samples"; lib.style.marginRight="10px";
+        lib.addEventListener("click", function(){ openLibrary(p.name); });
+        li.appendChild(lib);
         var del=document.createElement("button"); del.className="link danger";
         del.textContent="Remove";
         del.addEventListener("click", function(){
@@ -557,8 +598,81 @@ PAGE = b"""<!doctype html>
     }).catch(function(){});
   }
 
+  // ---- face library: one person's samples (remove / move one at a time) ----
+  var libName=null, libSel=null;
+  function setLibMsg(t, kind){ var m=el("libMsg"); m.textContent=t||" ";
+    m.className="msg"+(kind?(" "+kind):""); }
+  function libSelect(id){
+    libSel=id;
+    Array.prototype.forEach.call(el("libGrid").children, function(t){
+      t.classList.toggle("sel", t.dataset.id===id); });
+    el("libMove").disabled=!id; el("libDel").disabled=!id;
+  }
+  function renderLibrary(d){
+    var g=el("libGrid"); g.innerHTML="";
+    (d.samples||[]).forEach(function(smp){
+      var t=document.createElement("button"); t.type="button"; t.className="smp";
+      t.dataset.id=smp.id;
+      var bad = smp.outlier || smp.quality_label==="poor";
+      if(bad) t.classList.add("flag");
+      if(smp.thumb){ var im=document.createElement("img");
+        im.src="data:image/jpeg;base64,"+smp.thumb; im.alt=""; t.appendChild(im); }
+      else { var ph=document.createElement("div"); ph.className="noimg";
+        ph.textContent="no preview"; t.appendChild(ph); }
+      var cap=document.createElement("div"); cap.className="cap";
+      function tag(txt, cls){ var s=document.createElement("span");
+        s.className="tag "+cls; s.textContent=txt; cap.appendChild(s); }
+      if(smp.quality_label==="poor") tag("blurry","bad");
+      else if(smp.quality_label==="fair") tag("fair","meh");
+      if(smp.outlier) tag("doesn't match","bad");
+      var hasSim = smp.similarity!==null && smp.similarity!==undefined;
+      if(hasSim && !smp.outlier) tag(pct(smp.similarity)+" match","meh");
+      if(smp.added) { var dt=document.createElement("div");
+        dt.textContent=new Date(smp.added*1000).toLocaleDateString(); cap.appendChild(dt); }
+      t.appendChild(cap);
+      t.addEventListener("click", function(){ libSelect(smp.id); });
+      g.appendChild(t);
+    });
+    var n=(d.samples||[]).length;
+    el("libTitle").textContent=d.name+" - "+n+(n===1?" sample":" samples");
+    libSelect(null);
+  }
+  function openLibrary(name, done){
+    // done: the result of the action that triggered a reload, kept on screen.
+    libName=name; el("libTo").value=""; if(!done) setLibMsg("Loading...");
+    el("lib").hidden=false;
+    api("person/samples?name="+encodeURIComponent(name)).then(function(d){
+      if(!d.ok){ setLibMsg(d.message||"Could not load samples.","err"); return; }
+      setLibMsg(done||""); if(done) el("libMsg").className="msg ok"; renderLibrary(d);
+    }).catch(function(){ setLibMsg("Could not load samples.","err"); });
+  }
+  function libAction(path, extra, done){
+    if(!libSel) return;
+    el("libMove").disabled=true; el("libDel").disabled=true;
+    api(path+"?name="+encodeURIComponent(libName)+"&id="+encodeURIComponent(libSel)+(extra||""),
+        {method:"POST"}).then(function(r){
+      setLibMsg(r.message, r.ok?"ok":"err"); refreshPeople();
+      if(r.ok && done) done(r); else libSelect(libSel);
+    }).catch(function(){ setLibMsg("That didn't work. Try again.","err"); libSelect(libSel); });
+  }
+  el("libDel").addEventListener("click", function(){
+    libAction("sample/delete", "", function(r){
+      if(r.left===0){ el("lib").hidden=true; setMsg(r.message,"ok"); }
+      else openLibrary(libName, r.message);
+    });
+  });
+  el("libMove").addEventListener("click", function(){
+    var to=el("libTo").value.trim();
+    if(!to){ setLibMsg("Type who this face really is.","err"); el("libTo").focus(); return; }
+    libAction("sample/move", "&to="+encodeURIComponent(to),
+              function(r){ openLibrary(libName, r.message); });
+  });
+  el("libX").addEventListener("click", function(){ el("lib").hidden=true; });
+  el("lib").addEventListener("click", function(ev){
+    if(ev.target===el("lib")) el("lib").hidden=true; });
+
   // ---- sighting lightbox: enlarge, then name (known names autocomplete) ----
-  var modalEvent=null;
+  var modalEvent=null, modalForce=false;
   function setModalMsg(t, kind){ var m=el("modalMsg"); m.textContent=t||" ";
     m.className="msg"+(kind?(" "+kind):""); }
   function openSighting(e){
@@ -572,6 +686,7 @@ PAGE = b"""<!doctype html>
     var input=el("modalName");
     input.value=e.unknown?"":(e.name||"");
     setModalMsg(""); el("modalSave").disabled=false; el("modalIgnore").disabled=false;
+    modalForce=false; el("modalSave").textContent="Save";
     el("modal").hidden=false; input.focus();
   }
   function closeModal(){ el("modal").hidden=true; modalEvent=null; }
@@ -580,10 +695,13 @@ PAGE = b"""<!doctype html>
     var n=el("modalName").value.trim();
     if(!n){ setModalMsg("Enter a name for this face.","err"); el("modalName").focus(); return; }
     el("modalSave").disabled=true;
-    api("sighting/name?id="+encodeURIComponent(modalEvent.id)+"&name="+encodeURIComponent(n),
-        {method:"POST"}).then(function(r){
+    api("sighting/name?id="+encodeURIComponent(modalEvent.id)+"&name="+encodeURIComponent(n)
+        +(modalForce?"&force=1":""), {method:"POST"}).then(function(r){
       if(r.ok){ setMsg(r.message,"ok"); closeModal(); refreshPeople(); refreshLog(); }
-      else { setModalMsg(r.message||"Could not save.","err"); el("modalSave").disabled=false; }
+      else {
+        setModalMsg(r.message||"Could not save.","err"); el("modalSave").disabled=false;
+        if(r.needs_confirm){ modalForce=true; el("modalSave").textContent="Save anyway"; }
+      }
     }).catch(function(){ setModalMsg("Save failed. Try again.","err");
                          el("modalSave").disabled=false; });
   }
@@ -614,13 +732,13 @@ PAGE = b"""<!doctype html>
 
   // ---- enrollment: capture (per camera) / upload -> review -> save ----
   function showReview(thumbB64, token){
-    pendingToken=token;
+    pendingToken=token; forceSave=false; el("save").textContent="Save face";
     el("reviewThumb").src="data:image/jpeg;base64,"+thumbB64;
     el("review").classList.add("show");
     el("name").focus();
   }
   function resetEnroll(){
-    pendingToken=null;
+    pendingToken=null; forceSave=false; el("save").textContent="Save face";
     el("review").classList.remove("show");
   }
   el("pick").addEventListener("click", function(){ el("file").click(); });
@@ -640,9 +758,10 @@ PAGE = b"""<!doctype html>
     if(!n){ setMsg("Enter a name first.","err"); el("name").focus(); return; }
     if(!pendingToken){ resetEnroll(); return; }
     busy(true);
-    api("enroll/commit?token="+encodeURIComponent(pendingToken)+"&name="+encodeURIComponent(n),
-        {method:"POST"}).then(function(r){
+    api("enroll/commit?token="+encodeURIComponent(pendingToken)+"&name="+encodeURIComponent(n)
+        +(forceSave?"&force=1":""), {method:"POST"}).then(function(r){
       busy(false); setMsg(r.message, r.ok?"ok":"err");
+      if(r.needs_confirm){ forceSave=true; el("save").textContent="Save anyway"; }
       if(r.ok){ el("name").value=""; resetEnroll(); refreshPeople(); refreshLog(); }
     }).catch(function(){ busy(false); setMsg("Save failed. Try again.","err"); });
   });
@@ -709,17 +828,24 @@ def make_server(app, host: str = "0.0.0.0", port: int = 8099):
             elif path == "/enroll/upload":
                 self._json(app.stage_from_image(self._body()))
             elif path == "/enroll/commit":
-                self._json(app.commit_enrollment(self._param("token"), self._param("name")))
+                self._json(app.commit_enrollment(self._param("token"), self._param("name"),
+                                                 force=self._param("force") == "1"))
             elif path == "/enroll/cancel":
                 self._json(app.cancel_enrollment(self._param("token")))
             elif path == "/enroll/ignore":
                 self._json(app.ignore_capture(self._param("token"), self._param("name")))
             elif path == "/sighting/name":
-                self._json(app.name_sighting(self._param("id"), self._param("name")))
+                self._json(app.name_sighting(self._param("id"), self._param("name"),
+                                             force=self._param("force") == "1"))
             elif path == "/sighting/ignore":
                 self._json(app.ignore_sighting(self._param("id"), self._param("name")))
             elif path == "/person/delete":
                 self._json(app.delete_person(self._param("name")))
+            elif path == "/sample/delete":
+                self._json(app.delete_sample(self._param("name"), self._param("id")))
+            elif path == "/sample/move":
+                self._json(app.move_sample(self._param("name"), self._param("id"),
+                                           self._param("to")))
             elif path == "/ignored/delete":
                 self._json(app.unignore(self._param("name")))
             elif path == "/suggestion/ignore":
@@ -737,6 +863,8 @@ def make_server(app, host: str = "0.0.0.0", port: int = 8099):
                 self._json(app.public_status())
             elif path == "/people":
                 self._json({"people": app.people_view()})
+            elif path == "/person/samples":
+                self._json(app.person_samples(self._param("name")))
             elif path == "/ignored":
                 self._json({"faces": app.db.ignored_faces()})
             elif path == "/suggestions":

@@ -38,6 +38,16 @@ class FakeCamera:
         self.source_kind = "ha" if camera_entity else "stream"
 
 
+class FakeQuality:
+    """Scores every face ``score`` (None = no quality model, gate off)."""
+
+    def __init__(self, score=None):
+        self.score = score
+
+    def score_thumb(self, _thumb):
+        return self.score
+
+
 class FakeEvents:
     """Records the local_faces_recognized events that would have been fired."""
 
@@ -153,6 +163,7 @@ def make_app(db, log, faces=(), cameras=("arcade",), statics=None, triggers=None
                                            on_change=app.wake.set, token="test")
     app.triggers.connected = True          # as if the websocket were up
     app.events = FakeEvents()
+    app.quality = FakeQuality()
     app.httpd = None
     app.running = True
     app._lock = threading.Lock()
