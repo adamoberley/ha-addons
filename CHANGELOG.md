@@ -1,5 +1,12 @@
 # Changelog
 
+## Local Faces 0.7.1 — 2026-09-30
+
+**Fixes the crash on start in 0.7.0** (#21): with *One sensor per person* on,
+the app exited before the dashboard came up. Person sensors also now reliably
+appear after a restart or broker reconnect, and nobody is left stuck "present"
+from before the app stopped.
+
 ## Hue Entertainment 0.4.0 — 2026-09-09
 
 **The panel now shows what's actually happening.** Every zone card carries one

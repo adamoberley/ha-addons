@@ -89,6 +89,9 @@ class MqttPublisher:
         self.opts = opts
         self.cameras = list(cameras)
         self.client = None
+        self.people: dict[str, str] = {}   # {name: slug} currently announced
+        # Last state per person, re-sent on (re)connect: see _on_connect.
+        self._person_state: dict[str, tuple[str, str]] = {}
 
     def _resolve(self) -> tuple[str | None, int, str | None, str | None]:
         o = self.opts
@@ -158,8 +161,21 @@ class MqttPublisher:
             "icon": "mdi:face-recognition",
             "device": _device(),
         }), retain=True)
+        # People too. start() connects asynchronously and the app announces its
+        # people straight after, so on a normal boot that first announce goes
+        # out before the connection is up and paho drops it; this is where they
+        # actually reach Home Assistant, on first connect and every reconnect.
+        # Their states go with them: otherwise a person who was "present" when
+        # the app last stopped stays on in HA until they're next seen.
+        for name, slug in self.people.items():
+            self._announce_person(client, name, slug)
+            if slug in self._person_state:
+                payload, attrs = self._person_state[slug]
+                client.publish(_state_topic(f"person_{slug}"), payload, retain=True)
+                client.publish(_attr_topic(f"person_{slug}"), attrs, retain=True)
         client.publish(AVAIL_TOPIC, "online", retain=True)
-        log.info("MQTT connected; announced %d camera sensor(s) + aggregate", len(self.cameras))
+        log.info("MQTT connected; announced %d camera sensor(s) + aggregate + %d person(s)",
+                 len(self.cameras), len(self.people))
 
     def publish(self, slug: str, state: str, attrs: dict) -> None:
         if not self.client:
@@ -207,14 +223,17 @@ class MqttPublisher:
         return dict(wanted)
 
     def publish_person(self, slug: str, present: bool, attrs: dict) -> None:
+        payload, attrs_json = ("ON" if present else "OFF"), json.dumps(attrs)
+        self._person_state[slug] = (payload, attrs_json)
         if not self.client:
             return
         topic = f"person_{slug}"
-        self.client.publish(_state_topic(topic), "ON" if present else "OFF", retain=True)
-        self.client.publish(_attr_topic(topic), json.dumps(attrs), retain=True)
+        self.client.publish(_state_topic(topic), payload, retain=True)
+        self.client.publish(_attr_topic(topic), attrs_json, retain=True)
 
     def clear_person(self, slug: str) -> None:
         """Remove a person's entity from Home Assistant (empty retained config)."""
+        self._person_state.pop(slug, None)
         if not self.client:
             return
         self.client.publish(_person_disco_topic(slug), "", retain=True)
