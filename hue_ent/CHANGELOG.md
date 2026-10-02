@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.5.0 — 2026-10-02
+
+- **Fixed: LedFX devices were recreated over and over, resetting their effects**
+  ([#30](https://github.com/adamoberley/ha-addons/issues/30)). LedFX rounds a
+  device's frame rate up to one its clock can hit, and nothing is slower than
+  about 10 fps. So a 5 fps zone read back as 10, never looked "in sync", and
+  every provisioning pass deleted and recreated its device. That also briefly
+  left the LedFX virtual without a device, which is what set off the
+  `publish_paused_state` error in LedFX's own MQTT integration. Rates are now
+  compared the way LedFX stores them.
+- **Changes are applied in place.** A new pixel count, port or frame rate
+  updates the existing LedFX device and keeps its effect. Only a new
+  `ledfx_ddp_target` still recreates it. Provisioning also runs only when
+  something LedFX cares about changed (or on *Rescan rooms*), not after every
+  save in the panel.
+- **Fixed: a zone disarmed seconds after arming, reporting "no DDP for 183s".**
+  The idle timer counted from the last frame the zone's port ever received,
+  even one from a session minutes earlier. It now counts from the arm or the
+  latest frame, whichever is later.
+- **Fixed: zones knocked each other off when switching rooms.** LedFX feeds
+  every zone that has an effect at the same time, and each stream could take
+  the bulbs from the zone that was streaming. Two arms that overlapped could
+  also both win and leave two zones streaming. Arms now run one at a time. A
+  stream alone never takes over from an active zone: only the HA switch or the
+  panel switches rooms, and the room you left stays off until its stream
+  stops and starts again.
+- **Saving one room no longer interrupts another.** A rebuild used to disarm
+  every zone and rebind every port. Zones whose settings didn't change now keep
+  their listener and, if they're streaming, their session.
+- **Retained commands are ignored.** An "ON" published with retain set to a
+  zone's command topic used to re-arm the zone on every reconnect (and, before
+  this release, on every rebuild). It's now ignored, logged and cleared from
+  the broker.
+
 ## 0.4.0 — 2026-09-09
 
 - **The panel now shows what's actually happening.** Each zone card reports the

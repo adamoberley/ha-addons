@@ -16,12 +16,28 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import threading
 import urllib.error
 import urllib.request
 
 LOG = logging.getLogger("hue_ent.ledfx")
 
 RETRY_S = 30.0
+
+# LedFX's slowest frame rate; a zone asking for less gets this instead.
+LEDFX_MIN_FPS = 10
+# How far above the requested rate LedFX's snap can land (its grid is
+# 1000/n fps, so the steps stay well under this across 10-126 fps).
+FPS_SNAP_SLACK = 1.15
+
+# Keys LedFX can change on a live device; anything else (the target address)
+# needs the device recreated.
+UPDATABLE_KEYS = ("port", "pixel_count", "refresh_rate")
+
+# Serializes passes: cancelling the asyncio task doesn't stop a pass already
+# running in its worker thread, so a rebuild during one could otherwise race it
+# (both see the old listing, both act on it).
+_PASS_LOCK = threading.Lock()
 
 
 def _request(url: str, method: str = "GET", body: dict | None = None) -> dict:
@@ -44,11 +60,26 @@ def desired_config(zone, target_ip: str) -> dict:
     }
 
 
-def _matches(existing: dict, want: dict) -> bool:
-    return all(existing.get(key) == value for key, value in want.items())
+def _fps_ok(have, want: int) -> bool:
+    """Is LedFX's stored refresh rate what it would make of ``want``?"""
+    if not isinstance(have, (int, float)):
+        return False
+    return want <= have <= max(want * FPS_SNAP_SLACK, LEDFX_MIN_FPS)
 
 
-def _provision_once(base_url: str, target_ip: str, zones) -> None:
+def drifted_keys(existing: dict, want: dict) -> list[str]:
+    """The keys of ``want`` that the existing LedFX config doesn't satisfy."""
+    out = []
+    for key, value in want.items():
+        if key == "refresh_rate":
+            if not _fps_ok(existing.get(key), value):
+                out.append(key)
+        elif existing.get(key) != value:
+            out.append(key)
+    return out
+
+
+def _provision_pass(base_url: str, target_ip: str, zones) -> None:
     """One synchronous pass; raises on API errors so the caller can retry."""
     listing = _request(f"{base_url}/api/devices")
     devices = listing.get("devices", listing) or {}
@@ -65,12 +96,22 @@ def _provision_once(base_url: str, target_ip: str, zones) -> None:
         existing = by_name.get(want["name"])
         if existing is not None:
             dev_id, cfg = existing
-            if _matches(cfg, want):
+            drift = drifted_keys(cfg, want)
+            if not drift:
                 LOG.debug("[%s] LedFX device '%s' already in sync", zone.name, want["name"])
                 continue
+            changes = ", ".join(f"{k} {cfg.get(k)!r} -> {want[k]!r}" for k in drift)
+            if all(k in UPDATABLE_KEYS for k in drift):
+                # Send the whole config: LedFX saves exactly what it's given,
+                # so a partial one would drop the user's other device settings.
+                _request(f"{base_url}/api/devices/{dev_id}", method="PUT",
+                         body={"config": {**cfg, **want}})
+                LOG.info("[%s] updated LedFX device '%s' in place (%s)",
+                         zone.name, want["name"], changes)
+                continue
             LOG.warning(
-                "[%s] LedFX device '%s' drifted from zone config - recreating "
-                "(its effect selection resets)", zone.name, want["name"],
+                "[%s] LedFX device '%s' changed (%s) - recreating "
+                "(its effect selection resets)", zone.name, want["name"], changes,
             )
             _request(f"{base_url}/api/devices/{dev_id}", method="DELETE")
         _request(f"{base_url}/api/devices", method="POST", body={"type": "ddp", "config": want})
@@ -79,6 +120,11 @@ def _provision_once(base_url: str, target_ip: str, zones) -> None:
             zone.name, want["name"], target_ip, want["port"],
             want["pixel_count"], want["refresh_rate"],
         )
+
+
+def _provision_once(base_url: str, target_ip: str, zones) -> None:
+    with _PASS_LOCK:
+        _provision_pass(base_url, target_ip, zones)
 
 
 async def provision_forever(base_url: str, target_ip: str, zones) -> None:

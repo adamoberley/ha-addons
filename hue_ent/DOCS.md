@@ -91,7 +91,11 @@ Details and knobs:
   machine.
 - Provisioning is idempotent: a device that already matches its zone is left
   untouched (effect included). If you change a zone's lights, port, or fps, its
-  LedFX device is recreated to match — re-pick the effect afterwards.
+  LedFX device is updated in place and keeps its effect. Only changing
+  `ledfx_ddp_target` recreates the devices (re-pick the effects afterwards).
+- LedFX's slowest frame rate is about 10 fps, so a zone set below that shows
+  10 fps on its LedFX device. That's expected: the zone still sends to the
+  bulbs at its own rate.
 - If you remove a zone, delete its old `Hue <zone>` device in LedFX yourself.
 - Managing devices manually instead: any DDP sender works — point it at the
   zone's `ddp_port` with pixel count = number of lights.
@@ -103,7 +107,15 @@ Each zone appears as a switch — named after the zone, so it shows up as
 discovery. Turning it on arms the zone (captures each bulb's current state,
 pauses `pause_entities`, starts streaming); turning it off stops streaming and
 **restores every bulb to its pre-session state**. Only one zone streams at a
-time; arming a second zone stops the first.
+time. Turning on a second zone's switch (or arming it in the panel) stops the
+first. A LedFX stream on its own never takes over: if LedFX is feeding several
+zones at once, whichever zone is already streaming keeps the bulbs, and a zone
+you switched away from stays off until its stream stops and a new one begins.
+
+Commands are momentary. If something publishes a zone's command with *retain*
+set (an MQTT tool, a misconfigured automation), the app ignores it and clears
+it from the broker, so a stale "ON" can't re-arm the zone whenever the app
+reconnects.
 
 **Off means off.** If you switch a zone off by hand while LedFX is still
 sending, it stays off — it won't immediately re-arm from the live stream. It
