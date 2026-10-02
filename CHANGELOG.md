@@ -1,5 +1,14 @@
 # Changelog
 
+## Hue Entertainment 0.5.0 — 2026-10-02
+
+**LedFX devices stay put, and zones stop fighting** (#30): a zone under 10 fps
+no longer gets its LedFX device recreated (and its effect reset) on every pass,
+because LedFX rounds rates up and the app now allows for that. Real changes are
+applied in place. A freshly armed zone gets its full idle timeout instead of
+inheriting a minutes-old frame, a LedFX stream can no longer take the bulbs
+from the zone that's streaming, and saving one room leaves the others running.
+
 ## Local Faces 0.10.0 — 2026-09-30
 
 **Faces are confirmed across frames before they're reported**, Frigate-style:

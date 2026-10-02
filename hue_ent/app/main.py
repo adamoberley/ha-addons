@@ -77,6 +77,15 @@ class Zone:
         self.brightness_scale: float = float(cfg.get("brightness_scale") or 1.0)
 
     @property
+    def signature(self) -> tuple:
+        """Everything that defines the zone; equal signatures need no rebuild."""
+        return (
+            self.name, tuple(self.lights), self.proxy, self.fps, self.ddp_port,
+            self.idle_timeout_s, self.auto_start, tuple(self.pause_entities),
+            self.brightness_scale,
+        )
+
+    @property
     def switch_command_topic(self) -> str:
         return f"{BASE_TOPIC}/{self.slug}/set"
 
@@ -281,12 +290,15 @@ class ZoneRunner:
                 next_tick = max(next_tick + interval, time.monotonic())
 
                 ddp = self.ddp
-                # Idle is measured from the last frame, or from the arm when no
-                # frame has ever arrived - otherwise a zone armed with nothing
+                # Idle is measured from the last frame or from the arm, whichever
+                # is later. From the arm, because a zone armed with nothing
                 # streaming (an HA switch, the panel's test button, a LedFX that
-                # never starts) stays armed forever, holding its pause entities
-                # off and its switch on.
-                last_rx = ddp.last_rx if (ddp and ddp.last_rx) else self._armed_at
+                # never starts) must still time out rather than hold its pause
+                # entities off forever. And never from a frame older than the
+                # arm: the listener outlives sessions, so its last frame can be
+                # minutes old - which used to disarm a freshly armed zone on its
+                # first tick ("no DDP for 183s", #30).
+                last_rx = max(ddp.last_rx if ddp else 0.0, self._armed_at)
                 idle_for = time.monotonic() - last_rx
                 if idle_for > self.zone.idle_timeout_s:
                     LOG.info("[%s] no DDP for %.0fs - auto-disarming", self.zone.name, idle_for)
@@ -352,26 +364,31 @@ class Bridge:
         self.devices_seen = asyncio.Event()
         self._pending_arms: set[str] = set()
         self._known_slugs: set[str] = set()
+        self._subscribed: set[str] = set()  # topics subscribed on this connection
         self.provision_task: asyncio.Task | None = None
+        self._provisioned: tuple | None = None  # LedFX configs of the last kick
         self._rebuild_lock = asyncio.Lock()
+        # One arm at a time: arming takes seconds (the Zigbee ritual), and two
+        # overlapping arms each saw the other as "not armed yet" - so both
+        # zones ended up streaming at once.
+        self._arm_lock = asyncio.Lock()
+        self._arming: str | None = None
 
     # -- zone assembly / live rebuild -------------------------------------
 
-    async def rebuild_zones(self) -> None:
-        """(Re)assemble effective zones from auto rooms + overrides and apply live."""
+    async def rebuild_zones(self, force_provision: bool = False) -> None:
+        """(Re)assemble effective zones from auto rooms + overrides and apply live.
+
+        Only zones that actually changed are torn down: an unchanged zone keeps
+        its runner, its DDP socket and - if it is streaming - its session, so
+        saving one room in the panel doesn't interrupt another.
+        """
         async with self._rebuild_lock:
             manual = self.options.get("zones") or []
             auto_enabled = bool(self.options.get("auto_zones", True))
             configs, views = self.store.assemble(self.auto_rooms, manual, auto_enabled)
             self.room_views = views
 
-            for runner in self.runners.values():
-                if runner.armed:
-                    await runner.disarm()
-                runner.close()
-            await asyncio.sleep(0.2)  # let UDP sockets fully release before rebinding
-
-            old_slugs = set(self.zones)
             zones: dict[str, Zone] = {}
             for cfg in configs:
                 try:
@@ -379,11 +396,32 @@ class Bridge:
                     zones[zone.slug] = zone
                 except (ValueError, KeyError) as exc:
                     LOG.error("skipping zone: %s", exc)
+
+            kept: dict[str, ZoneRunner] = {}
+            for slug, runner in self.runners.items():
+                new = zones.get(slug)
+                if (new is not None and new.signature == runner.zone.signature
+                        and runner.ddp_transport is not None):
+                    kept[slug] = runner
+                    continue
+                if runner.armed:
+                    await runner.disarm()
+                runner.close()
+            if len(kept) < len(self.runners):
+                await asyncio.sleep(0.2)  # let UDP sockets fully release before rebinding
+
+            old_slugs = set(self.zones)
+            for slug, runner in kept.items():
+                zones[slug] = runner.zone
             self.zones = zones
-            self.runners = {slug: ZoneRunner(zone, self) for slug, zone in zones.items()}
+            self.runners = {
+                slug: kept.get(slug) or ZoneRunner(zone, self) for slug, zone in zones.items()
+            }
 
             loop = asyncio.get_running_loop()
             for slug, zone in self.zones.items():
+                if slug in kept:
+                    continue
                 runner = self.runners[slug]
                 try:
                     transport, proto = await loop.create_datagram_endpoint(
@@ -406,15 +444,29 @@ class Bridge:
                 for slug in (old_slugs | self._known_slugs) - set(self.zones):
                     await self._clear_discovery(slug)
             self._known_slugs |= set(self.zones)
-            self._kick_provisioning()
+            self._kick_provisioning(force=force_provision)
 
-    def _kick_provisioning(self) -> None:
+    def _kick_provisioning(self, force: bool = False) -> None:
+        """Sync LedFX devices to the zones - only when what LedFX needs changed.
+
+        Every rebuild used to re-run provisioning, so each panel save or rescan
+        was another chance to touch LedFX's devices. Now an unchanged set of
+        zones leaves LedFX alone unless ``force`` (an explicit rescan).
+        """
         ledfx_url = str(self.options.get("ledfx_url", "http://127.0.0.1:8888") or "").strip()
         ledfx_target = str(self.options.get("ledfx_ddp_target") or "127.0.0.1").strip()
         if not ledfx_url or not self.zones:
             return
-        if self.provision_task is not None and not self.provision_task.done():
+        wanted = tuple(
+            sorted(tuple(sorted(ledfx.desired_config(z, ledfx_target).items()))
+                   for z in self.zones.values())
+        )
+        running = self.provision_task is not None and not self.provision_task.done()
+        if wanted == self._provisioned and not force:
+            return  # in flight or done for exactly these zones
+        if running:
             self.provision_task.cancel()
+        self._provisioned = wanted
         self.provision_task = asyncio.ensure_future(
             ledfx.provision_forever(ledfx_url, ledfx_target, list(self.zones.values()))
         )
@@ -422,7 +474,7 @@ class Bridge:
     async def rescan_rooms(self) -> None:
         self.discovery = await registry.discover_rooms(self.z2m_lights, retries=1)
         self.auto_rooms = self.discovery.rooms
-        await self.rebuild_zones()
+        await self.rebuild_zones(force_provision=True)
 
     # -- MQTT plumbing -----------------------------------------------------
 
@@ -435,12 +487,18 @@ class Bridge:
             LOG.debug("publish to %s failed: %s", topic, exc)
 
     async def _subscribe_zones(self) -> None:
+        """Subscribe to topics not yet subscribed on this connection.
+
+        Re-subscribing makes the broker resend every retained message on the
+        topic, so each rebuild used to replay them all.
+        """
         if self.client is None:
             return
         for zone in self.zones.values():
-            await self.client.subscribe(zone.switch_command_topic)
-            for fn in zone.lights:
-                await self.client.subscribe(f"{Z2M_BASE}/{fn}")
+            for topic in (zone.switch_command_topic, *(f"{Z2M_BASE}/{fn}" for fn in zone.lights)):
+                if topic not in self._subscribed:
+                    await self.client.subscribe(topic)
+                    self._subscribed.add(topic)
 
     async def publish_discovery(self) -> None:
         device = {
@@ -476,28 +534,59 @@ class Bridge:
 
     # -- arming ------------------------------------------------------------
 
+    def _busy_elsewhere(self, slug: str) -> str | None:
+        """The zone (other than ``slug``) that is armed or arming, if any."""
+        if self._arming is not None and self._arming != slug:
+            return self._arming
+        return next((o for o, r in self.runners.items() if o != slug and r.armed), None)
+
     def schedule_arm(self, slug: str, reason: str) -> None:
         if self.stopping or slug in self._pending_arms:
+            return
+        # A stream alone never takes over from another zone: LedFX happily
+        # feeds every zone with an effect at once, so letting each stream
+        # preempt made zones knock each other off in a loop. Only an explicit
+        # request (the HA switch, the panel) switches rooms.
+        if reason == "ddp" and self._busy_elsewhere(slug):
             return
         self._pending_arms.add(slug)
 
         async def _do() -> None:
             try:
-                await self.arm_zone(slug)
+                await self.arm_zone(slug, preempt=reason != "ddp")
             finally:
                 self._pending_arms.discard(slug)
 
         asyncio.get_running_loop().create_task(_do())
 
-    async def arm_zone(self, slug: str) -> None:
-        if slug not in self.zones:
-            return
+    async def arm_zone(self, slug: str, preempt: bool = True) -> None:
+        async with self._arm_lock:
+            if slug not in self.zones:
+                return
+            runner = self.runners[slug]
+            if runner.armed:
+                return
+            busy = self._busy_elsewhere(slug)
+            if busy and not preempt:
+                LOG.debug("[%s] DDP arrived while '%s' is active - not taking over", slug, busy)
+                return
+            self._arming = slug
+            try:
+                await self._arm_locked(slug, runner)
+            finally:
+                self._arming = None
+
+    async def _arm_locked(self, slug: str, runner: ZoneRunner) -> None:
         # Only one zone streams at a time (single coordinator airtime budget,
         # single proxy broadcast domain) - arming a zone stops the active one.
-        for other_slug, runner in self.runners.items():
-            if other_slug != slug and runner.armed:
+        for other_slug, other in self.runners.items():
+            if other_slug != slug and other.armed:
                 LOG.info("zone '%s' requested while '%s' active - stopping it", slug, other_slug)
-                await runner.disarm()
+                # Treated like switching it off by hand: its own stream, still
+                # running in LedFX, mustn't grab the bulbs back the moment this
+                # zone lets go - only a new stream there re-arms it.
+                other._suppress_auto = True
+                await other.disarm()
         deadline = time.monotonic() + 5.0
         while (
             any(fn not in self.nwk for fn in self.zones[slug].lights)
@@ -512,7 +601,7 @@ class Bridge:
             )
             await self.publish(self.zones[slug].switch_state_topic, "OFF", retain=True)
             return
-        await self.runners[slug].arm()
+        await runner.arm()
 
     # -- Home Assistant Core service calls (pause entities) --------------
 
@@ -575,12 +664,27 @@ class Bridge:
         )
         self.devices_seen.set()
 
-    def handle_message(self, topic: str, payload: bytes) -> None:
+    def handle_message(self, topic: str, payload: bytes, retain: bool = False) -> None:
         if topic == f"{Z2M_BASE}/bridge/devices":
             self._parse_z2m_devices(payload)
             return
         for zone in self.zones.values():
             if topic == zone.switch_command_topic:
+                if retain:
+                    # A command someone published with retain set (an
+                    # automation, an MQTT tool) would replay on every
+                    # (re)subscribe and arm the zone out of nowhere. Commands
+                    # are momentary: ignore it and clear it off the broker.
+                    if payload:
+                        LOG.warning(
+                            "[%s] ignoring retained command %r on %s - clearing it",
+                            zone.name, payload.decode(errors="replace"), topic,
+                        )
+                        asyncio.get_running_loop().create_task(
+                            self.publish(topic, "", retain=True))
+                    return
+                if not payload.strip():
+                    return  # a retained-message clear (ours above), not a command
                 want_on = payload.decode(errors="replace").strip().upper() == "ON"
                 if want_on:
                     self.schedule_arm(zone.slug, reason="switch")
@@ -609,6 +713,7 @@ class Bridge:
                     will=will, identifier="hue_ent_bridge",
                 ) as client:
                     self.client = client
+                    self._subscribed.clear()
                     LOG.info("connected to MQTT %s:%d", host, port)
                     await client.subscribe(f"{Z2M_BASE}/bridge/devices")
                     await self._subscribe_zones()
@@ -616,7 +721,9 @@ class Bridge:
                     await self.publish(AVAILABILITY_TOPIC, "online", retain=True)
                     try:
                         async for message in client.messages:
-                            self.handle_message(str(message.topic), bytes(message.payload))
+                            self.handle_message(
+                                str(message.topic), bytes(message.payload), bool(message.retain)
+                            )
                     except asyncio.CancelledError:
                         LOG.info("shutdown signal received - restoring zones")
                         await self.shutdown()
