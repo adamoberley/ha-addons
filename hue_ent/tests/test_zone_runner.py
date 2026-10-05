@@ -32,6 +32,10 @@ class FakeBridge:
         self.light_states: dict[str, dict] = {}
         self.pause_calls: list[bool] = []
         self.stopping = False
+        self.offline: set[str] = set()
+
+    def _busy_elsewhere(self, slug: str) -> str | None:
+        return None
 
     async def publish(self, topic: str, payload: str, retain: bool = False) -> None:
         self.published.append((topic, payload))

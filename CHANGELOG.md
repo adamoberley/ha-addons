@@ -1,5 +1,14 @@
 # Changelog
 
+## Hue Entertainment 0.6.0 — 2026-10-04
+
+**Zones keep working when a proxy bulb is powered off**: the app follows
+zigbee2mqtt's availability reports and relays through the strongest online bulb
+instead of leaving the zone dark. Adaptive Lighting is detected from the entity
+registry, so renamed switches are found, and a switch saved in the panel no
+longer goes stale when it's renamed. The panel also says why a room that's
+receiving frames isn't streaming.
+
 ## Hue Entertainment 0.5.0 — 2026-10-02
 
 **LedFX devices stay put, and zones stop fighting** (#30): a zone under 10 fps
