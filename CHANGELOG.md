@@ -1,5 +1,11 @@
 # Changelog
 
+## Hue Entertainment 0.6.1 — 2026-10-04
+
+**Bulbs come back properly after a session**: the relaying bulb could
+occasionally keep the closing frame's near-black level. Restores are now read
+back and resent to any bulb that didn't take them.
+
 ## Hue Entertainment 0.6.0 — 2026-10-04
 
 **Zones keep working when a proxy bulb is powered off**: the app follows

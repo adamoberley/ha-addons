@@ -113,3 +113,76 @@ def test_an_unreadable_availability_message_changes_nothing(tmp_path):
     bridge.handle_message(f"{Z2M}/Hall 1/availability", b"[1, 2]")
     bridge.handle_message(f"{Z2M}/Hall 1/availability", b"")
     assert bridge.offline == {"Hall 1"}
+
+
+# --- the restore is checked ------------------------------------------------
+
+class ProxyKeepsTheClosingFrame:
+    """Bulb L1 reports the closing frame's level the first time it's restored."""
+
+    def __init__(self, bridge, fn="L1"):
+        self.bridge, self.fn, self.fired = bridge, fn, False
+        self.inner = bridge.publish
+
+    async def __call__(self, topic, payload, retain=False):
+        await self.inner(topic, payload, retain)
+        if topic == f"{Z2M}/{self.fn}/set" and '"brightness"' in payload and not self.fired:
+            self.fired = True
+            self.bridge.light_states[self.fn] = {"state": "ON", "brightness": 1}
+
+
+def restores(bridge, fn):
+    return [p for p in set_topics(bridge, fn) if '"brightness"' in p]
+
+
+@pytest.mark.asyncio
+async def test_a_restore_that_did_not_take_is_sent_again():
+    runner, bridge = make_runner(lights=("L1", "L2"))
+    bridge.light_states = {"L1": {"state": "ON", "brightness": 58, "color_temp": 500},
+                           "L2": {"state": "ON", "brightness": 90}}
+    await arm(runner)
+    bridge.publish = ProxyKeepsTheClosingFrame(bridge)
+
+    await runner.disarm()
+
+    assert len(restores(bridge, "L1")) == 2
+    assert json.loads(restores(bridge, "L1")[1]) == {
+        "state": "ON", "brightness": 58, "color_temp": 500}
+    assert len(restores(bridge, "L2")) == 1                   # it reported nothing wrong
+
+
+@pytest.mark.asyncio
+async def test_the_check_runs_before_adaptive_lighting_comes_back():
+    """Otherwise Adaptive Lighting's own adjustment would look like a failure."""
+    runner, bridge = make_runner(lights=("L1",))
+    bridge.light_states = {"L1": {"state": "ON", "brightness": 58}}
+    await arm(runner)
+    order = []
+    inner_publish, inner_pause = bridge.publish, bridge.set_pause_entities
+
+    async def publish(topic, payload, retain=False):
+        await inner_publish(topic, payload, retain)
+        if '"brightness"' in payload:
+            order.append("restore")
+
+    async def pause(zone, paused):
+        await inner_pause(zone, paused)
+        order.append("pause off" if not paused else "pause on")
+        bridge.light_states["L1"] = {"state": "ON", "brightness": 120}   # AL adapts
+
+    bridge.publish, bridge.set_pause_entities = publish, pause
+    await runner.disarm()
+
+    assert order == ["restore", "pause off"]
+
+
+@pytest.mark.parametrize("report, payload, took", [
+    ({"state": "ON", "brightness": 57}, {"state": "ON", "brightness": 58}, True),
+    ({"state": "ON", "brightness": 1}, {"state": "ON", "brightness": 58}, False),
+    ({"state": "ON"}, {"state": "ON", "brightness": 58}, True),
+    ({"state": "ON", "brightness": 40}, {"state": "ON"}, True),
+    ({"state": "ON", "brightness": 40}, {"state": "OFF"}, False),
+    ({}, {"state": "OFF"}, False),
+])
+def test_what_counts_as_a_restore_that_took(report, payload, took):
+    assert main_mod._restore_took(report, payload) is took
