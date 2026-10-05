@@ -29,14 +29,20 @@ Then open the **sidebar panel** to fine-tune the parts only you can know:
   use ↑/↓ to reorder.
 - **Proxy** — the bulb that receives the stream and re-broadcasts it to the
   rest. Every other bulb in the zone must be in direct radio range of it, so
-  pick a central, always-powered bulb.
+  pick a central, always-powered bulb. If zigbee2mqtt reports the proxy
+  offline when the zone arms (a bulb on a wall switch that's off), the zone
+  streams through its strongest online bulb for that session instead, and
+  bulbs that are offline are skipped and marked **offline** in the panel.
 - **Target fps** — 20 is a good default; 25 is the practical ceiling (also the
   rate a real Hue Bridge streams at). Lower still looks smooth.
 - **Brightness** — a global dimmer for the streamed output.
 - **Pause while streaming** — entities turned **off** while the zone streams
-  and back **on** afterwards (your room's Adaptive Lighting switch is
-  pre-filled when it can be detected; without it, adaptive lighting will fight
-  the stream).
+  and back **on** afterwards. Your room's Adaptive Lighting switch is filled in
+  automatically, even if you've renamed it, and kept up to date: as long as you
+  leave this field as detected, a renamed or replaced switch is picked up on the
+  next **Rescan rooms**. Entities you type yourself are kept, except ones that
+  no longer exist in Home Assistant, which are dropped (and logged). Without a
+  pause entity, Adaptive Lighting will fight the stream.
 - **Enabled** — untick rooms you never want to stream.
 - **Test stream** — arms the zone right there so you can check it end to end.
 - **Live numbers** — each card reports what the zone is actually doing: the DDP
@@ -140,6 +146,9 @@ diagnosis:
 | `no DDP yet on :4049 — point a LedFX device here` | Nothing has *ever* arrived on this zone's port. Its LedFX device is missing, disabled, or aimed at the wrong port/host. |
 | `idle — last frame 74s ago` | LedFX streamed earlier and stopped (effect off, or nothing playing). Normal. |
 | `armed for 12s, no DDP` | The zone is armed but nothing is arriving; it releases the bulbs after `idle_timeout_s`. |
+| `in 20.8 fps · Kitchen has the bulbs — switch on here to take over` | LedFX is feeding this zone too, but another zone is streaming. Turn this zone's switch on to move over. |
+| `in 20.8 fps · switched off — ignoring this stream until it stops` | You switched this zone off while LedFX kept sending. It re-arms on the next new stream. |
+| `via hue_lamp (proxy offline) · in … · out …` | The configured proxy is unreachable, so another bulb is relaying this session. |
 
 Each bulb also shows its **signal** — the Zigbee link quality zigbee2mqtt last
 reported, with a ★ on the strongest in the room. Use it as a *starting point*
@@ -169,7 +178,9 @@ re-rendered mid-edit — unsaved changes survive the refresh.
   of your Hue bulbs is in that list, please open an issue with the log line.
 - **Nothing moves.** Check the zone's live line (above). `no DDP yet` is a LedFX
   problem (wrong device/port), while `in … fps` with no `out … fps` is a Zigbee
-  one — look at the proxy bulb and its signal.
+  one — look at the proxy bulb and its signal. Bulbs marked **offline** have no
+  power or are out of reach of zigbee2mqtt; they can't take part until they're
+  back. A zone with every bulb offline refuses to arm (and says so in the log).
 - **It stutters.** Lower **Target fps** to 20, and try the ★ (strongest signal)
   bulb as the proxy. A proxy that can't reach the rest of the room drops frames
   for the whole zone.

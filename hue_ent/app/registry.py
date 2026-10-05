@@ -45,8 +45,14 @@ WS_URL = os.environ.get("HA_WS_URL", "ws://supervisor/core/websocket")
 # A Zigbee IEEE address as z2m and the MQTT integration write it: 0x + 16 hex.
 IEEE_RE = re.compile(r"0x[0-9a-fA-F]{16}")
 
-# Adaptive Lighting creates several switches per config; only the bare
-# switch.adaptive_lighting_<name> is the master we want to pause.
+# Adaptive Lighting creates several switches per config; only the master is
+# the one we want to pause. The registry tells them apart reliably: the
+# master's unique_id is the config's name and each sub-switch's is that name
+# plus one of these suffixes. Entity ids are only a fallback - users rename
+# them (switch.hallway_night_light_adaptive_lighting_hallway_night_light is a
+# master; switch.adaptive_lighting_<x>_adaptive_lighting_sleep_mode_<x> isn't).
+AL_PLATFORM = "adaptive_lighting"
+AL_UNIQUE_SUFFIXES = ("_sleep_mode", "_adapt_brightness", "_adapt_color")
 AL_PREFIX = "switch.adaptive_lighting_"
 AL_SUB_SWITCHES = ("sleep_mode_", "adapt_brightness_", "adapt_color_")
 
@@ -64,6 +70,7 @@ class AreaMap:
     by_ieee: dict[str, str] = field(default_factory=dict)          # 0x… -> area name
     by_entity_slug: dict[str, str] = field(default_factory=dict)   # light slug -> area name
     al_switches: dict[str, str] = field(default_factory=dict)      # area slug -> entity_id
+    entity_ids: set[str] = field(default_factory=set)              # every enabled entity
     areas: int = 0
     devices: int = 0
     unreadable: list[str] = field(default_factory=list)            # devices we had to skip
@@ -86,6 +93,9 @@ class Discovery:
     areas: int = 0
     lights: int = 0
     matched: int = 0
+    # Every enabled entity id HA knows (None until a read succeeds), so saved
+    # pause entities that were renamed or deleted since can be spotted.
+    entity_ids: set[str] | None = None
 
     @property
     def summary(self) -> str:
@@ -168,6 +178,24 @@ async def _fetch_registries() -> tuple[list, list, list]:
     return areas, devices, entities
 
 
+def _al_master_name(ent: dict) -> str | None:
+    """The Adaptive Lighting config name if ``ent`` is a master switch, else None."""
+    entity_id = str(ent.get("entity_id", ""))
+    if not entity_id.startswith("switch."):
+        return None
+    unique_id = ent.get("unique_id")
+    if ent.get("platform") == AL_PLATFORM and isinstance(unique_id, str) and unique_id:
+        return None if unique_id.endswith(AL_UNIQUE_SUFFIXES) else unique_id
+    if ent.get("platform") not in (None, AL_PLATFORM):
+        return None
+    # No registry details (old HA, fixtures): fall back to the default ids.
+    if entity_id.startswith(AL_PREFIX):
+        suffix = entity_id[len(AL_PREFIX):]
+        if not suffix.startswith(AL_SUB_SWITCHES):
+            return suffix
+    return None
+
+
 def build_area_map(areas: list, devices: list, entities: list) -> AreaMap:
     """Fold the three HA registries into one "where does this light live" view."""
     area_names = {
@@ -210,6 +238,8 @@ def build_area_map(areas: list, devices: list, entities: list) -> AreaMap:
         except TypeError:  # unhashable junk in an entity row
             LOG.debug("skipping unreadable entity registry entry %s", entity_id or "?")
             continue
+        if entity_id and not ent.get("disabled_by"):
+            out.entity_ids.add(entity_id)
         if not area:
             continue
 
@@ -218,14 +248,12 @@ def build_area_map(areas: list, devices: list, entities: list) -> AreaMap:
             for ieee in device_ieees.get(ent.get("device_id"), ()):
                 out.by_ieee[ieee] = area  # entity-level area wins over the device's
 
-        if entity_id.startswith(AL_PREFIX):
-            suffix = entity_id[len(AL_PREFIX):]
-            if suffix.startswith(AL_SUB_SWITCHES):
-                continue  # not the master switch
-            # Prefer the switch's own area; fall back to matching by name.
+        config_name = _al_master_name(ent)
+        if config_name is not None and not ent.get("disabled_by"):
+            # Prefer the switch's own area; a config named after a room wins it.
             al_candidates.setdefault(_slug(area), entity_id)
-            if suffix in area_slugs:
-                al_candidates[suffix] = entity_id
+            if _slug(config_name) in area_slugs:
+                al_candidates[_slug(config_name)] = entity_id
     out.al_switches = al_candidates
 
     if out.unreadable:
@@ -284,6 +312,7 @@ async def discover_rooms(z2m_lights: dict[str, dict], retries: int = 3) -> Disco
             result = Discovery(
                 rooms=rooms, ok=True, areas=area_map.areas,
                 lights=len(z2m_lights), matched=matched,
+                entity_ids=area_map.entity_ids,
             )
             LOG.info(
                 "discovered %d room(s) with color Hue lights: %s (%d/%d light(s) "

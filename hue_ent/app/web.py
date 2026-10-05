@@ -22,6 +22,8 @@ import os
 
 from aiohttp import web as aioweb
 
+from . import zonestore
+
 LOG = logging.getLogger("hue_ent.web")
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
@@ -50,6 +52,10 @@ def _state(bridge) -> dict:
         # proxy (LQI is measured to the coordinator, not between bulbs), so it's
         # offered as a hint rather than applied.
         strongest = max(lqi, key=lqi.get) if lqi else None
+        held_by = None
+        if runner and not runner.armed:
+            busy = bridge._busy_elsewhere(slug)
+            held_by = bridge.zones[busy].name if busy in bridge.zones else None
         rooms.append({
             "slug": slug,
             "source": view["source"],
@@ -61,6 +67,10 @@ def _state(bridge) -> dict:
             "link_quality": lqi,
             "strongest_light": strongest,
             "stats": runner.stats if runner else None,
+            "offline_lights": [fn for fn in lights if fn in bridge.offline],
+            # Why a room that's receiving frames isn't streaming them.
+            "held_by": held_by,
+            "suppressed": bool(runner and runner._suppress_auto),
             "available_lights": view["available_lights"],
             "skipped": view.get("skipped", []),
             "proxy": cfg.get("proxy") or (cfg.get("lights") or [None])[0],
@@ -109,7 +119,9 @@ def make_app(bridge) -> aioweb.Application:
                 {"error": "unknown or manual zone (edit manual zones in the app options)"},
                 status=400,
             )
-        bridge.store.set_override(slug, body)
+        auto = next((r for r in bridge.auto_rooms if zonestore._slug(r["name"]) == slug), None)
+        bridge.store.set_override(
+            slug, body, auto_pause=auto.get("pause_entities", []) if auto else None)
         await bridge.rebuild_zones()
         return aioweb.json_response(_state(bridge))
 

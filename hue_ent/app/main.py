@@ -135,6 +135,10 @@ class ZoneRunner:
         self.saved_states: dict[str, dict | None] = {}
         self._ticker: asyncio.Task | None = None
         self._armed_at = 0.0
+        # This session's proxy and reachable bulbs: the configured proxy unless
+        # zigbee2mqtt reports it offline (a bulb on a wall switch that's off).
+        self.proxy: str = zone.proxy
+        self.online: list[str] = list(zone.lights)
         self.sends = 0                     # Zigbee frames pushed to the proxy
         self._sent_at: collections.deque[float] = collections.deque(maxlen=64)
         self._last_zig_send = 0.0
@@ -173,6 +177,7 @@ class ZoneRunner:
                               if ddp and ddp.last_rx else None),
             "sends": self.sends,
             "tx_fps": _rate(self._sent_at),
+            "proxy": self.proxy if self.armed else None,
         }
 
     def manual_off(self) -> asyncio.Task:
@@ -182,17 +187,53 @@ class ZoneRunner:
 
     # -- lifecycle -------------------------------------------------------
 
+    def _pick_proxy(self) -> str | None:
+        """The configured proxy if it's reachable, else the best online bulb.
+
+        Every frame is sent to the proxy, which re-broadcasts it to the rest -
+        so an offline proxy means the whole zone stays dark, however many of
+        its other bulbs are on.
+        """
+        if not self.online:
+            return None
+        if self.zone.proxy in self.online:
+            return self.zone.proxy
+
+        def lqi(fn: str) -> float:
+            value = (self.bridge.light_states.get(fn) or {}).get("linkquality")
+            return value if isinstance(value, (int, float)) else -1
+
+        return max(self.online, key=lqi)  # ties keep pixel order (max is stable)
+
     async def arm(self) -> None:
         if self.armed:
             return
+        offline = self.bridge.offline
+        self.online = [fn for fn in self.zone.lights if fn not in offline]
+        proxy = self._pick_proxy()
+        if proxy is None:
+            LOG.error(
+                "[%s] cannot arm - zigbee2mqtt reports all its lights offline "
+                "(powered off at the wall?)", self.zone.name,
+            )
+            await self.bridge.publish(self.zone.switch_state_topic, "OFF", retain=True)
+            return
+        if proxy != self.zone.proxy:
+            LOG.warning(
+                "[%s] proxy %s is offline - streaming through %s instead",
+                self.zone.name, self.zone.proxy, proxy,
+            )
+        self.proxy = proxy
+        skipped = [fn for fn in self.zone.lights if fn not in self.online]
         LOG.info(
-            "[%s] arming (%d lights, proxy=%s, %g fps)",
-            self.zone.name, len(self.zone.lights), self.zone.proxy, self.zone.fps,
+            "[%s] arming (%d lights, proxy=%s, %g fps)%s",
+            self.zone.name, len(self.online), self.proxy, self.zone.fps,
+            f" - skipping offline {', '.join(skipped)}" if skipped else "",
         )
-        self.saved_states = {fn: self.bridge.light_states.get(fn) for fn in self.zone.lights}
+        self.saved_states = {fn: self.bridge.light_states.get(fn) for fn in self.online}
         await self.bridge.set_pause_entities(self.zone, paused=True)
         # Lights must be on to render; turn them on without disturbing color.
-        for fn in self.zone.lights:
+        for fn in self.online:
             prev = self.saved_states.get(fn)
             if not prev or prev.get("state") != "ON":
                 await self.bridge.publish(f"{Z2M_BASE}/{fn}/set", json.dumps({"state": "ON"}))
@@ -207,11 +248,11 @@ class ZoneRunner:
 
     async def _arm_ritual(self) -> None:
         """Stop-all, then per light: attribute write + sequence sync."""
-        for fn in self.zone.lights:
+        for fn in self.online:
             await self.bridge.publish(f"{Z2M_BASE}/{fn}/set", protocol.sync_payload(self.counter))
             await asyncio.sleep(0.05)
         await asyncio.sleep(0.3)
-        for fn in self.zone.lights:
+        for fn in self.online:
             await self.bridge.publish(f"{Z2M_BASE}/{fn}/set", protocol.arm_write_payload())
             await asyncio.sleep(0.15)
             await self.bridge.publish(f"{Z2M_BASE}/{fn}/set", protocol.sync_payload(self.counter))
@@ -228,7 +269,7 @@ class ZoneRunner:
         try:
             await self._send_black()
             await asyncio.sleep(0.3)
-            for fn in self.zone.lights:
+            for fn in self.online:
                 topic = f"{Z2M_BASE}/{fn}/set"
                 await self.bridge.publish(topic, protocol.sync_payload(self.counter))
                 await asyncio.sleep(0.05)
@@ -255,7 +296,7 @@ class ZoneRunner:
         if records:
             self.counter += 1
             await self.bridge.publish(
-                f"{Z2M_BASE}/{self.zone.proxy}/set",
+                f"{Z2M_BASE}/{self.proxy}/set",
                 protocol.stream_frame_payload(self.counter, 0x0100, records),
             )
 
@@ -338,7 +379,7 @@ class ZoneRunner:
             return
         self.counter += 1
         await self.bridge.publish(
-            f"{Z2M_BASE}/{self.zone.proxy}/set",
+            f"{Z2M_BASE}/{self.proxy}/set",
             protocol.stream_frame_payload(self.counter, smoothing, records),
         )
         self._last_zig_send = time.monotonic()
@@ -356,6 +397,7 @@ class Bridge:
         self.nwk: dict[str, int] = {}
         self.z2m_lights: dict[str, dict] = {}  # Philips lights: fn -> {ieee, color}
         self.light_states: dict[str, dict] = {}
+        self.offline: set[str] = set()  # lights zigbee2mqtt reports unreachable
         self.auto_rooms: list[dict] = []
         self.discovery = registry.Discovery()  # last room-discovery result (for the GUI)
         self.room_views: list[dict] = []
@@ -386,7 +428,10 @@ class Bridge:
         async with self._rebuild_lock:
             manual = self.options.get("zones") or []
             auto_enabled = bool(self.options.get("auto_zones", True))
-            configs, views = self.store.assemble(self.auto_rooms, manual, auto_enabled)
+            configs, views = self.store.assemble(
+                self.auto_rooms, manual, auto_enabled,
+                known_entities=self.discovery.entity_ids,
+            )
             self.room_views = views
 
             zones: dict[str, Zone] = {}
@@ -495,7 +540,11 @@ class Bridge:
         if self.client is None:
             return
         for zone in self.zones.values():
-            for topic in (zone.switch_command_topic, *(f"{Z2M_BASE}/{fn}" for fn in zone.lights)):
+            for topic in (
+                zone.switch_command_topic,
+                *(f"{Z2M_BASE}/{fn}" for fn in zone.lights),
+                *(f"{Z2M_BASE}/{fn}/availability" for fn in zone.lights),
+            ):
                 if topic not in self._subscribed:
                     await self.client.subscribe(topic)
                     self._subscribed.add(topic)
@@ -664,9 +713,24 @@ class Bridge:
         )
         self.devices_seen.set()
 
+    def _parse_availability(self, fn: str, payload: bytes) -> None:
+        """zigbee2mqtt's per-device availability: {"state": "online"} or bare text."""
+        text = payload.decode(errors="replace").strip()
+        try:
+            state = json.loads(text).get("state")
+        except (ValueError, AttributeError):
+            state = text
+        if state == "offline":
+            self.offline.add(fn)
+        elif state == "online":
+            self.offline.discard(fn)
+
     def handle_message(self, topic: str, payload: bytes, retain: bool = False) -> None:
         if topic == f"{Z2M_BASE}/bridge/devices":
             self._parse_z2m_devices(payload)
+            return
+        if topic.startswith(f"{Z2M_BASE}/") and topic.endswith("/availability"):
+            self._parse_availability(topic[len(Z2M_BASE) + 1:-len("/availability")], payload)
             return
         for zone in self.zones.values():
             if topic == zone.switch_command_topic:

@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.6.0 — 2026-10-04
+
+- **Streams through an offline proxy's neighbours.** Every frame goes to the
+  zone's proxy bulb, so a proxy on a wall switch that was off left the whole
+  zone dark. The app now follows zigbee2mqtt's availability reports: when the
+  proxy is offline, the zone streams through its strongest online bulb for that
+  session, skips offline bulbs when arming and restoring, and refuses to arm
+  (rather than pausing Adaptive Lighting for nothing) when every bulb is offline.
+  The panel marks offline bulbs and shows which bulb is relaying.
+- **Adaptive Lighting is found even when renamed.** Its master switch is now
+  recognised from the entity registry (the integration and its unique id), not
+  from the entity id. A renamed master switch was missed before, and renamed
+  "adapt brightness" / "sleep mode" sub-switches could be picked by mistake.
+  Disabled switches are skipped.
+- **Pause entities no longer go stale.** Saving a room in the panel used to
+  freeze the detected Adaptive Lighting switch into the saved settings, so once
+  it was renamed the zone kept pausing an entity that no longer existed. The
+  detected switch now stays live unless you change the field yourself, and saved
+  entities that no longer exist in Home Assistant are dropped (with a log line).
+  A room left with none goes back to the detected switch.
+- **The panel says why a room isn't streaming.** A room receiving frames while
+  another has the bulbs, or after you switched it off, used to read "arming…"
+  indefinitely. It now names the room that has the bulbs, or says it's waiting
+  for the stream to stop.
+
 ## 0.5.0 — 2026-10-02
 
 - **Fixed: LedFX devices were recreated over and over, resetting their effects**

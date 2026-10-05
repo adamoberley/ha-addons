@@ -56,6 +56,7 @@
   .stats.live b { color: var(--ok); }
   .light .lqi { color: var(--dim); font-size: 11.5px; white-space: nowrap; }
   .light .lqi.best { color: var(--ok); }
+  .light .avail { color: var(--warn); font-size: 11.5px; }
   #msg { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
          background: var(--card2); border: 1px solid var(--line); border-radius: 8px;
          padding: 8px 16px; font-size: 13.5px; display: none; }
@@ -131,6 +132,7 @@ function statsLine(room) {
   const tx = s.tx_fps ? `out <b>${s.tx_fps} fps</b>` : null;
   const bits = [];
   if (s.armed) {
+    if (s.proxy && s.proxy !== room.proxy) bits.push(`via <b>${s.proxy}</b> (proxy offline)`);
     if (rx && tx) bits.push(rx, tx);
     else if (rx) bits.push(rx, "waiting to send");
     else bits.push(`armed for ${Math.round(s.armed_for_s || 0)}s, <b>no DDP</b>`);
@@ -138,6 +140,12 @@ function statsLine(room) {
     bits.push(`<b>no DDP yet</b> on :${room.ddp_port} — point a LedFX device here`);
   } else if (s.last_rx_age_s > 5) {
     bits.push(`idle — last frame ${Math.round(s.last_rx_age_s)}s ago`);
+  } else if (rx && room.suppressed) {
+    bits.push(rx, "switched off — ignoring this stream until it stops");
+  } else if (rx && room.held_by) {
+    bits.push(rx, `<b>${room.held_by}</b> has the bulbs — switch on here to take over`);
+  } else if (rx && !room.auto_start) {
+    bits.push(rx, "auto-start is off — switch on to stream");
   } else if (rx) {
     bits.push(rx, "arming…");
   } else {
@@ -156,6 +164,10 @@ function patchStats(fresh) {
     if (host) {
       host.innerHTML = statsLine(room);
       host.classList.toggle("live", !!(room.stats && room.stats.tx_fps));
+    }
+    for (const row of el.querySelectorAll(".light")) {
+      const off = (room.offline_lights || []).includes($(".fn", row).textContent);
+      $(".avail", row).textContent = off ? "offline" : "";
     }
     for (const [fn, lqi] of Object.entries(room.link_quality || {})) {
       const row = [...el.querySelectorAll(".light")]
@@ -222,6 +234,8 @@ function card(room) {
           ? "no signal report from zigbee2mqtt yet"
           : "Zigbee link quality to the coordinator" + (best ? " — strongest of this room" : "")}"
           >${lqi === undefined ? "" : "signal " + lqi + (best ? " ★" : "")}</span>
+        <span class="avail" title="zigbee2mqtt can't reach this bulb (powered off at the wall?) — it's skipped while streaming"
+          >${(room.offline_lights || []).includes(fn) ? "offline" : ""}</span>
         <label><input type="radio" name="proxy-${room.slug}" ${edit.proxy === fn ? "checked" : ""}> proxy</label>
         <button class="small up" ${i === 0 ? "disabled" : ""}>↑</button>
         <button class="small down" ${i === edit.lights.length - 1 ? "disabled" : ""}>↓</button>
