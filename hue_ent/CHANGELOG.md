@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.6.1 — 2026-10-04
+
+- **Fixed: the relaying bulb could stay almost off after a session.** When a
+  zone stops, its proxy gets the closing frame, the stop and its restore in
+  quick succession, and those don't always arrive in order. Now and then the
+  proxy kept the closing frame's near-black level (brightness 1) instead of its
+  restored state. Seen on a real Hue Go relaying for its room. The app now reads
+  the bulbs' reports back after restoring and sends the restore again to any bulb
+  that didn't take it. It does this before turning the pause entities back on,
+  so Adaptive Lighting's own adjustments aren't mistaken for a failure.
+  Stopping a zone takes about a second longer as a result.
+
 ## 0.6.0 — 2026-10-04
 
 - **Streams through an offline proxy's neighbours.** Every frame goes to the
