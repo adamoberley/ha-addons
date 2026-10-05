@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.6.2 — 2026-10-04
+
+- **Fixed: a bulb could stay almost off after a session if the app had just
+  started.** A bulb is restored to the state it was in before the session, but
+  zigbee2mqtt doesn't keep that state on the broker. Right after this app starts,
+  it knows nothing about a bulb until the bulb next reports. A zone armed in that
+  window never restored those bulbs, and they kept the session's closing
+  near-black frame (brightness 1). Arming now asks zigbee2mqtt to read any bulb
+  whose state isn't known yet, and waits up to 2 s for the answer. It logs any
+  bulb that doesn't answer. The same read also gives the offline-proxy failover
+  the signal numbers it needs right after a restart.
+- **Replaces 0.6.1's restore check**, which was built on a wrong diagnosis (it
+  blamed message ordering, not the missing state). It never ran in the failing
+  case and only made stopping a zone a second slower, so it's removed.
+
 ## 0.6.1 — 2026-10-04
 
 - **Fixed: the relaying bulb could stay almost off after a session.** When a

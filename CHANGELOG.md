@@ -1,5 +1,12 @@
 # Changelog
 
+## Hue Entertainment 0.6.2 — 2026-10-04
+
+**Bulbs come back properly even right after the app starts**: a zone armed
+before its bulbs had reported never restored them, leaving them almost off.
+Arming now reads any bulb whose state isn't known yet. This replaces 0.6.1's
+restore check, which addressed the wrong cause.
+
 ## Hue Entertainment 0.6.1 — 2026-10-04
 
 **Bulbs come back properly after a session**: the relaying bulb could
