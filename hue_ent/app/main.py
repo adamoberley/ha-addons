@@ -36,9 +36,11 @@ BASE_TOPIC = "hue_ent"
 AVAILABILITY_TOPIC = f"{BASE_TOPIC}/availability"
 KEEPALIVE_S = 4.0  # bulbs drop out of entertainment mode after a few silent seconds
 REARM_GAP_S = 6.0  # a zigbee-send gap longer than this means the mode has expired
-# How long after restoring to wait for the bulbs' own reports before checking
-# them (and before handing the room back to its pause entities).
-RESTORE_CHECK_S = 1.0
+# How long arming waits for zigbee2mqtt to answer a read of a bulb whose state
+# we haven't seen yet (z2m doesn't retain device state, so after a restart we
+# know nothing until each bulb next reports).
+STATE_FETCH_S = 2.0
+STATE_FETCH_PAYLOAD = json.dumps({"state": "", "brightness": "", "color_temp": "", "color": ""})
 
 
 def _rate(stamps) -> float:
@@ -208,11 +210,37 @@ class ZoneRunner:
 
         return max(self.online, key=lqi)  # ties keep pixel order (max is stable)
 
+    async def _fetch_unknown_states(self) -> None:
+        """Ask zigbee2mqtt for any bulb whose state we don't know yet.
+
+        A bulb's pre-session state is what it's restored to afterwards, and
+        z2m doesn't retain it: right after this app (re)starts, a bulb that
+        hasn't reported since has no snapshot, so it was never restored and
+        kept the closing frame's near-black level. Seen on a Hue Go armed
+        seconds after an update.
+        """
+        states = self.bridge.light_states
+        unknown = [fn for fn in self.online if fn not in states]
+        if not unknown:
+            return
+        for fn in unknown:
+            await self.bridge.publish(f"{Z2M_BASE}/{fn}/get", STATE_FETCH_PAYLOAD)
+        deadline = time.monotonic() + STATE_FETCH_S
+        while any(fn not in states for fn in unknown) and time.monotonic() < deadline:
+            await asyncio.sleep(0.05)
+        missing = [fn for fn in unknown if fn not in states]
+        if missing:
+            LOG.warning(
+                "[%s] no state from %s - %s won't be restored after this session",
+                self.zone.name, ", ".join(missing), "it" if len(missing) == 1 else "they",
+            )
+
     async def arm(self) -> None:
         if self.armed:
             return
         offline = self.bridge.offline
         self.online = [fn for fn in self.zone.lights if fn not in offline]
+        await self._fetch_unknown_states()
         proxy = self._pick_proxy()
         if proxy is None:
             LOG.error(
@@ -304,17 +332,6 @@ class ZoneRunner:
             )
 
     async def _restore_states(self) -> None:
-        """Put every bulb back as it was, then check the bulbs agree.
-
-        The proxy gets the closing frame, the stop and its restore in quick
-        succession, and zigbee2mqtt doesn't promise they land in that order:
-        now and then the proxy kept the closing frame's near-black level
-        (reporting brightness 1) instead of its restored one. So the bulbs'
-        reports are read back and a restore that didn't take is sent again -
-        before the pause entities come back on, so Adaptive Lighting's own
-        adjustments are never mistaken for a failed restore.
-        """
-        sent: dict[str, dict] = {}
         for fn, prev in self.saved_states.items():
             if prev is None:
                 continue
@@ -328,22 +345,6 @@ class ZoneRunner:
                     payload["color"] = {"x": prev["color"].get("x"), "y": prev["color"].get("y")}
                 elif prev.get("color_temp") is not None:
                     payload["color_temp"] = prev["color_temp"]
-            sent[fn] = payload
-            await self.bridge.publish(f"{Z2M_BASE}/{fn}/set", json.dumps(payload))
-            await asyncio.sleep(0.05)
-        if not sent:
-            return
-        await asyncio.sleep(RESTORE_CHECK_S)
-        for fn, payload in sent.items():
-            # No report since the snapshot leaves it as the snapshot - a match.
-            now = self.bridge.light_states.get(fn) or {}
-            if _restore_took(now, payload):
-                continue
-            LOG.info(
-                "[%s] %s reported %s after restore - sending it again",
-                self.zone.name, fn,
-                {k: now.get(k) for k in ("state", "brightness") if k in now},
-            )
             await self.bridge.publish(f"{Z2M_BASE}/{fn}/set", json.dumps(payload))
             await asyncio.sleep(0.05)
 
@@ -416,16 +417,6 @@ class ZoneRunner:
         self._sent_at.append(self._last_zig_send)
         self.sends += 1
         self._last_sent_frame = list(frame)
-
-
-def _restore_took(report: dict, payload: dict) -> bool:
-    """Whether a bulb's report matches the state we restored (state + brightness)."""
-    if report.get("state") != payload["state"]:
-        return False
-    want, got = payload.get("brightness"), report.get("brightness")
-    if want is None or not isinstance(got, (int, float)):
-        return True
-    return abs(got - want) <= 2  # z2m rounds through the 0-254 scale
 
 
 class Bridge:

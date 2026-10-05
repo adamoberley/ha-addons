@@ -1,4 +1,4 @@
-"""Shared test settings: keep the restore check's real-world wait out of tests."""
+"""Shared test settings: keep real-world waits out of the tests."""
 
 from __future__ import annotations
 
@@ -13,5 +13,5 @@ from hue_ent.app import main as main_mod
 
 
 @pytest.fixture(autouse=True)
-def quick_restore_check(monkeypatch):
-    monkeypatch.setattr(main_mod, "RESTORE_CHECK_S", 0.01)
+def quick_state_fetch(monkeypatch):
+    monkeypatch.setattr(main_mod, "STATE_FETCH_S", 0.05)
