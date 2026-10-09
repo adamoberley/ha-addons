@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.7.1 — 2026-10-08
+
+- **Art shows up again.** reframed.gallery moved its images to a new CDN, so
+  every artwork page looked image-less and each change ended in "no usable
+  artwork this cycle" — scheduled changes, **Show next**, and pasted links alike.
+  The app now reads the page's artwork data (schema.org `VisualArtwork`) and
+  pulls the **full-resolution 3840×2160 original** — sharper than the 1400px
+  version it used before.
+- Titles and artists now come from the gallery itself (proper capitalisation and
+  punctuation instead of being rebuilt from the link), and the piece's
+  description shows on the panel and in HA.
+- Pieces keep the same ids as before, so your no-repeat history and hidden list
+  carry over.
+
 ## 0.7.0 — 2026-09-09
 
 - **"Never show this."** Curated doesn't mean *to your taste* — when a piece goes

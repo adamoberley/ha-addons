@@ -1,5 +1,11 @@
 # Changelog
 
+## REFRAMED Gallery 0.7.1 — 2026-10-08
+
+**Art shows up again**: reframed.gallery moved its images to a new CDN and the
+app stopped finding any. It now reads each page's artwork data and pulls the
+full-resolution 4K original. No-repeat history and the hidden list carry over.
+
 ## Hue Entertainment 0.6.2 — 2026-10-04
 
 **Bulbs come back properly even right after the app starts**: a zone armed

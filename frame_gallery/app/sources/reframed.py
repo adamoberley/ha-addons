@@ -11,18 +11,24 @@ the family-safe keyword filter has subject/theme to match, not just the title.
 A single artwork page URL can also be resolved directly (normalize_artwork_url +
 artwork_from_url), which is what the panel's "Show this link" box uses.
 
-Largest public Cloudflare variant is "preview" (1400x787, ~16:9). Art is public
-domain (Wikimedia-sourced), free for personal use per the gallery's FAQ - so we
-identify ourselves, fetch gently, and credit reframed.gallery on screen.
+Each artwork page carries a schema.org VisualArtwork block whose contentUrl is
+the full-resolution original on cdn.reframed.gallery (3840x2160 for the Frame
+set). The gallery used to serve 1400px Cloudflare Images variants instead; we
+still key works by their Cloudflare image id (cfImageId, embedded in the page's
+data) so the no-repeat and hidden lists recorded under that scheme stay valid.
+Art is public domain (Wikimedia-sourced), free for personal use per the
+gallery's FAQ - so we identify ourselves, fetch gently, and credit
+reframed.gallery on screen.
 """
 from __future__ import annotations
 
+import json
 import logging
 import random
 import re
 import time
 from datetime import datetime
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 import requests
 
@@ -33,8 +39,7 @@ log = logging.getLogger("frame-gallery.reframed")
 SITEMAP = "https://www.reframed.gallery/sitemap.xml"
 COLLECTION = "https://www.reframed.gallery/collections/{}"
 BASE = "https://www.reframed.gallery"
-CDN_HASH = "ypD62Q2Ttpsm-db9mriXAg"
-VARIANT = "preview"               # largest public Cloudflare variant (1400x787)
+CDN = "https://cdn.reframed.gallery"
 POOL_TTL = 24 * 3600              # re-read sitemap/collection at most once a day
 RESOLVE_PER_CYCLE = 8             # new artwork pages resolved per candidates() call
 RESOLVE_DELAY = 2.0               # seconds between fetches (under Cloudflare's bot limit)
@@ -46,10 +51,10 @@ HEADERS = {
     "User-Agent": "ha-addons/0.1 (+https://github.com/adamoberley/ha-addons) frame-gallery",
 }
 
-_IMG_RE = re.compile(
-    r"imagedelivery\.net/" + re.escape(CDN_HASH)
-    + r"/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/(?:blur|preview)"
-)
+_LDJSON_RE = re.compile(
+    r'<script[^>]+type="application/ld\+json"[^>]*>(.*?)</script>', re.S | re.I)
+_CFID_RE = re.compile(
+    r'"cfImageId":"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"')
 _LOC_RE = re.compile(r"<loc>\s*([^<]+?)\s*</loc>", re.I)
 _LINK_RE = re.compile(r'href="(/[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*)"')
 _COLL_RE = re.compile(r"/collections/([a-z0-9-]+)")
@@ -202,32 +207,62 @@ class ReframedSource(ArtSource):
             log.info("reframed pool '%s': %d artworks", key, len(urls))
         return self._pools.get(key, [])
 
+    @staticmethod
+    def _ld_artwork(html: str) -> dict:
+        """The page's schema.org VisualArtwork block ({} if there isn't one)."""
+        for blob in _LDJSON_RE.findall(html):
+            try:
+                data = json.loads(blob)
+            except ValueError:
+                continue
+            for item in data if isinstance(data, list) else [data]:
+                if isinstance(item, dict) and item.get("@type") == "VisualArtwork":
+                    return item
+        return {}
+
+    @staticmethod
+    def _image_id(html: str, image_url: str) -> str:
+        """Stable id for a work: its Cloudflare image id (what earlier versions keyed
+        history on), from the page-data record for this original; else the
+        original's file name."""
+        r2_key = unquote(urlparse(image_url).path).lstrip("/")
+        flat = html.replace('\\"', '"')   # page data is JSON inside a JS string
+        for m in re.finditer(r'\{[^{}]*"r2Key":"' + re.escape(r2_key) + r'"[^{}]*\}', flat):
+            cf = _CFID_RE.search(m.group(0))
+            if cf:
+                return cf.group(1)
+        return r2_key.rsplit("/", 1)[-1]
+
     def _resolve(self, page_url: str) -> Artwork | None:
         if page_url in self._resolved:
             return self._resolved[page_url]
         r = self._get(page_url)
         if r is None:
             return None
-        m = _IMG_RE.search(r.text)
-        if not m:
-            log.debug("no image found on %s", page_url)
+        ld = self._ld_artwork(r.text)
+        image_url = ld.get("contentUrl") or ""
+        if not image_url.startswith(CDN + "/"):
+            log.warning("no image found on %s (page layout changed?)", page_url)
             return None
-        image_id = m.group(1)
-        segs = urlparse(page_url).path.strip("/").split("/")
-        artist = _deslug(segs[0])
-        title = _deslug(segs[1]) if len(segs) > 1 else "Untitled"
+        path = urlparse(page_url).path.rstrip("/")
+        segs = path.strip("/").split("/")
+        artist_ld = ld.get("artist")
+        artist = (artist_ld.get("name") if isinstance(artist_ld, dict) else artist_ld) \
+            or _deslug(segs[0])
+        title = ld.get("name") or (_deslug(segs[1]) if len(segs) > 1 else "Untitled")
         # Fold collection memberships into tags so exclude_keywords matches subject/theme.
         memberships = {s for s in _COLL_RE.findall(r.text) if s != "all"}
-        tags = " ".join([artist, title, *(_deslug(s) for s in memberships)]).lower()
+        tags = " ".join([artist, title, *segs, *(_deslug(s) for s in memberships)]).lower()
         art = Artwork(
             source=self.name,
-            id=image_id,
-            title=title,
-            artist=artist,
-            image_url=f"https://imagedelivery.net/{CDN_HASH}/{image_id}/{VARIANT}",
+            id=self._image_id(r.text, image_url),
+            title=str(title),
+            artist=str(artist),
+            image_url=image_url,
             public_domain=True,
             tags=tags,
             credit="reframed.gallery",
+            description=str(ld.get("description") or ""),
         )
         self._resolved[page_url] = art
         return art
