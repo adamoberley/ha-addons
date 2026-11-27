@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.7.2 — 2026-11-27
+
+- **Art changes again.** One fall piece on reframed.gallery (*Autumn Landscape*
+  by Walter Moras) is a damaged file, cut off just before its end. It was the
+  last fall piece you hadn't seen yet, so every change and every **Show next**
+  ended in "image file is truncated (27 bytes not processed)". Each image is now
+  checked before it's used, and a damaged one is skipped (and not downloaded
+  again until the app restarts).
+- **A collection that runs out repeats instead of stopping.** When every piece
+  in the current collection has been shown within the no-repeat window, the one
+  shown longest ago goes up again, instead of nothing at all. Fall has 45 pieces
+  and Christmas, which `seasonal` switches to in December, has 29, so this was
+  going to stop the gallery again on December 30.
+- A pasted link to a damaged piece now says so, instead of failing with a
+  decoder error.
+
 ## 0.7.1 — 2026-10-08
 
 - **Art shows up again.** reframed.gallery moved its images to a new CDN, so

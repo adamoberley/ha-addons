@@ -1,5 +1,12 @@
 # Changelog
 
+## REFRAMED Gallery 0.7.2 — 2026-11-27
+
+**Art changes again**: a damaged image on reframed.gallery stopped every change
+with "image file is truncated". Images are now checked before use and a damaged
+one is skipped, and a collection that has shown everything repeats its
+longest-ago piece instead of going blank.
+
 ## REFRAMED Gallery 0.7.1 — 2026-10-08
 
 **Art shows up again**: reframed.gallery moved its images to a new CDN and the

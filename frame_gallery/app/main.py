@@ -304,10 +304,12 @@ def main() -> int:
                 status.update(last_error=f"couldn't read {page_url}", note=None)
                 log.error("link didn't resolve to an artwork: %s", page_url)
                 return
-            data = gallery.download(art.image_url)
+            data = gallery.fetch_image(art)
             if not data:
-                status.update(last_error=f"couldn't download '{art.title}'", note=None)
-                log.error("link resolved but the image wouldn't download: %s", page_url)
+                status.update(last_error=f"couldn't get a usable image of '{art.title}' "
+                                         "(download failed or the file is damaged)",
+                              note=None)
+                log.error("link resolved but no usable image came back: %s", page_url)
                 return
             _show(art, data, "link push", link=page_url)
         except Exception as exc:

@@ -120,6 +120,13 @@ def test_a_corrupt_state_file_starts_fresh(tmp_path, monkeypatch):
 
 # --- the picker honours both ----------------------------------------------
 
+@pytest.fixture(autouse=True)
+def any_bytes_decode(monkeypatch):
+    """These tests serve placeholder bytes; image checking has its own tests."""
+    monkeypatch.setattr(gallery_mod, "_decodes", lambda data: True)
+    monkeypatch.setattr(gallery_mod, "_broken", set())
+
+
 class Opts:
     public_domain_only = True
     exclude_keywords = ()
