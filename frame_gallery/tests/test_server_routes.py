@@ -32,6 +32,9 @@ class FakeGallery:
             "hidden_count": 0, "tv_count": 1, "tv_ok": 1, **status})
         self.hide_result = (True, "Hidden 'Wheatfield' - picking another")
 
+    def snapshot(self):
+        return self.status.snapshot()
+
     def show_next(self):
         self.calls.append("next")
 

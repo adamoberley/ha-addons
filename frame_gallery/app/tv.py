@@ -36,6 +36,10 @@ except Exception:  # pragma: no cover - older/newer layout
 
 log = logging.getLogger("frame-gallery.tv")
 
+# A delete the TV answers without confirming is retried on later pushes, then
+# given up on (logged) so one stubborn id can't be retried forever.
+MAX_DELETE_ATTEMPTS = 5
+
 DEVICE_NAME = "FrameGallery"
 PAIR_TIMEOUT = 45            # first-run only: long window to tap "Allow" on the TV
 CONNECT_TIMEOUT = 10         # once paired: short connect/liveness timeout per attempt
@@ -80,6 +84,7 @@ class FrameTV:
                     data = json.load(fh)
                     data.setdefault("current_content_id", None)
                     data.setdefault("pending_deletes", [])
+                    data.setdefault("delete_attempts", {})
                     # library: our uploads, oldest first. Pre-0.6 state only knew
                     # the current id, so seed the list from it.
                     if "library" not in data:
@@ -88,7 +93,8 @@ class FrameTV:
                     return data
             except (OSError, ValueError):
                 pass
-        return {"current_content_id": None, "pending_deletes": [], "library": []}
+        return {"current_content_id": None, "pending_deletes": [], "library": [],
+                "delete_attempts": {}}
 
     def _save_state(self) -> None:
         tmp = self.state_file + ".tmp"
@@ -199,7 +205,10 @@ class FrameTV:
                 self.state["pending_deletes"].append(cid)
         self._save_state()
 
-        self._drain_deletes(art, keep=set(library))
+        if self.library_size:
+            self._drain_deletes(art, keep=set(library))
+        # library_size 0 promises nothing is deleted, so even deletes queued
+        # under an earlier limit wait until a limit is set again.
         if self.library_size != 1:
             log.info("%s: art library at %d/%s image(s)", self.host, len(library),
                      self.library_size or "unlimited")
@@ -230,15 +239,31 @@ class FrameTV:
             raise
 
     def _drain_deletes(self, art, keep: set) -> None:
+        """Delete queued uploads. samsungtvws returns False when the TV's answer
+        doesn't confirm the id, so only True counts as deleted; anything else is
+        retried on later pushes, up to MAX_DELETE_ATTEMPTS."""
         still_pending = []
+        attempts = self.state.setdefault("delete_attempts", {})
         for cid in self.state.get("pending_deletes", []):
             if cid in keep:
+                attempts.pop(cid, None)
                 continue
             try:
-                art.delete(cid)
-                log.info("%s: deleted previous art %s", self.host, cid)
+                confirmed, why = bool(art.delete(cid)), "the TV didn't confirm it"
             except Exception as exc:
-                log.warning("%s: delete of %s failed, will retry: %s", self.host, cid, exc)
-                still_pending.append(cid)
+                confirmed, why = False, str(exc)
+            if confirmed:
+                attempts.pop(cid, None)
+                log.info("%s: deleted previous art %s", self.host, cid)
+                continue
+            attempts[cid] = attempts.get(cid, 0) + 1
+            if attempts[cid] >= MAX_DELETE_ATTEMPTS:
+                attempts.pop(cid)
+                log.warning("%s: giving up deleting %s after %d tries (%s) - remove it "
+                            "from the TV's art library by hand if it's still there",
+                            self.host, cid, MAX_DELETE_ATTEMPTS, why)
+                continue
+            log.warning("%s: delete of %s failed, will retry: %s", self.host, cid, why)
+            still_pending.append(cid)
         self.state["pending_deletes"] = still_pending
         self._save_state()

@@ -39,7 +39,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install pytest pytest-asyncio pyyaml aiohttp aiomqtt requests \
-            pillow numpy "opencv-python-headless>=4.9,<6"
+            numpy "opencv-python-headless>=4.9,<6"
+          # frame_gallery's own pins (Pillow, samsungtvws, paho-mqtt) - small, all wheels.
+          python -m pip install -r frame_gallery/requirements.txt
       - name: Run tests
         run: python -m pytest
 

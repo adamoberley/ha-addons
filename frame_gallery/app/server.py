@@ -103,9 +103,9 @@ def make_server(app, host: str = "0.0.0.0", port: int = 8099, debug: bool = Fals
             if path in ("/", ""):
                 self._send(200, "text/html; charset=utf-8", PANEL_HTML)
             elif path == "/status":
-                self._json(200, app.status.snapshot())
+                self._json(200, app.snapshot())
             elif path == "/healthz":
-                self._json(*health(app.status.snapshot()))
+                self._json(*health(app.snapshot()))
             elif path == "/preview.jpg":
                 try:
                     body = Path(app.preview_path).read_bytes()

@@ -43,6 +43,8 @@ def test_seconds_until_today_and_tomorrow():
     assert schedule.seconds_until("04:00", AT) == 30 * 60
     assert schedule.seconds_until("03:00", AT) == 23 * 3600 + 30 * 60
     assert schedule.seconds_until("03:30", AT) == 24 * 3600    # exactly now = tomorrow
+    just_before = AT.replace(hour=3, minute=59, second=59)
+    assert schedule.seconds_until("04:00", just_before) == 24 * 3600 + 1   # jitter = the slot
 
 
 @pytest.mark.parametrize("bad", ["", "4", "24:00", "ab:cd"])
@@ -127,6 +129,12 @@ def test_commands_reach_the_gallery_and_echo_state(ctl):
     assert (mqtt_ctl.MATTE_STATE, "off") in ctl.client.published
 
 
+def test_an_old_none_matte_command_still_turns_the_matte_off(ctl):
+    ctl._on_message(None, None, message(mqtt_ctl.MATTE_CMD, "none"))
+    assert ctl.app.calls == [("matte", "none")]
+    assert ctl.client.published[-1] == (mqtt_ctl.MATTE_STATE, "off")
+
+
 def test_only_accepted_links_are_echoed(ctl):
     ctl._on_message(None, None, message(mqtt_ctl.LINK_CMD, "https://example.com/"))
     ctl._on_message(None, None, message(mqtt_ctl.LINK_CMD,
@@ -157,10 +165,11 @@ def test_current_art_attributes(ctl):
 # --- the TV art library -----------------------------------------------------
 
 class FakeArt:
-    def __init__(self, fail_delete=()):
+    def __init__(self, fail_delete=(), unconfirmed=()):
         self.n = 0
         self.deleted: list[str] = []
         self.fail_delete = set(fail_delete)
+        self.unconfirmed = set(unconfirmed)     # delete() answers False for these
 
     def upload(self, data, **kw):
         self.n += 1
@@ -175,7 +184,10 @@ class FakeArt:
     def delete(self, cid):
         if cid in self.fail_delete:
             raise OSError("busy")
+        if cid in self.unconfirmed:
+            return False
         self.deleted.append(cid)
+        return True
 
 
 @pytest.fixture
@@ -221,3 +233,26 @@ def test_a_failed_delete_is_retried_on_the_next_push(frame):
     t._upload_and_select(art, b"x", "none")
     assert art.deleted == ["MY_F0001", "MY_F0002"]
     assert t.state["pending_deletes"] == []
+
+
+def test_keep_all_does_not_drain_deletes_queued_under_an_earlier_limit(frame):
+    t, art = frame(1), FakeArt(fail_delete={"MY_F0001"})
+    t._upload_and_select(art, b"x", "none")
+    t._upload_and_select(art, b"x", "none")           # MY_F0001's delete fails
+    assert t.state["pending_deletes"] == ["MY_F0001"]
+    t.library_size = 0                                  # restarted with keep-all
+    art.fail_delete.clear()
+    t._upload_and_select(art, b"x", "none")
+    assert art.deleted == []
+    assert t.state["pending_deletes"] == ["MY_F0001"]   # kept for a later limit
+
+
+def test_an_unconfirmed_delete_is_retried_then_given_up(frame):
+    t, art = frame(1), FakeArt(unconfirmed={"MY_F0001"})
+    t._upload_and_select(art, b"x", "none")
+    for _ in range(tv_mod.MAX_DELETE_ATTEMPTS - 1):
+        t._upload_and_select(art, b"x", "none")
+        assert "MY_F0001" in t.state["pending_deletes"]
+    t._upload_and_select(art, b"x", "none")
+    assert "MY_F0001" not in t.state["pending_deletes"]
+    assert "MY_F0001" not in t.state["delete_attempts"]

@@ -147,6 +147,7 @@ class ReframedSource(ArtSource):
         self._pools: dict[str, list[str]] = {}   # pool key -> artwork page URLs
         self._pool_ts: dict[str, float] = {}
         self._resolved: dict[str, Artwork] = {}  # page URL -> Artwork
+        self.last_pool = ""                      # collection the last batch came from
 
     def choice(self, opts) -> str:
         """What the user picked: the live HA override, else the option."""
@@ -280,7 +281,8 @@ class ReframedSource(ArtSource):
         pool = self._load_pool(key)
         if not pool and key != "__all__":
             log.warning("collection '%s' empty - falling back to the whole catalogue", key)
-            pool = self._load_pool("__all__")
+            key, pool = "__all__", self._load_pool("__all__")
+        self.last_pool = "all" if key == "__all__" else key
         if not pool:
             return []
 

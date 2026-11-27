@@ -10,7 +10,7 @@ MQTT client - so the split is deliberate:
   * Status is a locked dict the loop writes and everyone else reads.
 
 Intents, highest priority first, when several arrive at once:
-  LINK    show the queued reframed.gallery link
+  LINK    show the queued reframed.gallery link (the URL rides with the intent)
   NEXT    pick a fresh piece (also what "Never show this" asks for)
   REMAT   re-render the current piece with the new TV matte
   REPUSH  re-send the current image as-is
@@ -58,21 +58,24 @@ class Status:
 
 
 class Intents:
-    """Requests from the panel/HA for the loop, plus the event that wakes it."""
+    """Requests from the panel/HA for the loop, plus the event that wakes it.
+    Each intent carries an optional payload (the link's URL), stored and taken
+    under the same lock so a request and its data can't land in different
+    passes of the loop."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._pending: set[str] = set()
+        self._pending: dict[str, object] = {}
         self._wake = threading.Event()
 
-    def request(self, intent: str) -> None:
+    def request(self, intent: str, payload=None) -> None:
         with self._lock:
-            self._pending.add(intent)
+            self._pending[intent] = payload     # a newer request replaces an older one
             self._wake.set()
 
-    def take(self) -> set[str]:
+    def take(self) -> dict[str, object]:
         with self._lock:
-            pending, self._pending = self._pending, set()
+            pending, self._pending = self._pending, {}
             self._wake.clear()
             return pending
 
@@ -94,8 +97,8 @@ class Gallery:
         self.intents = Intents()
         self.stop = threading.Event()
         self.listeners: list = []           # callables(art, status_snapshot) after a show
-        self._link = ""                     # the link queued by the panel / HA
-        self._link_lock = threading.Lock()
+        # monotonic time a failed scheduled change is due to be tried again
+        self._retry_at: float | None = None
         # The source bytes + matte the preview was rendered from, so a matte
         # change re-renders the same piece and a re-push uses the right matte.
         self._rendered_from: bytes | None = None
@@ -105,7 +108,7 @@ class Gallery:
             title="", artist="", year="", medium="", movement="", credit="",
             source=opts.source, link="", key="",
             collection=opts.collection, showing_collection="", matte=opts.tv_matte,
-            tv_count=len(tvs), tv_ok=0, hidden_count=len(history.hidden),
+            tv_count=len(tvs), tv_ok=0,
             interval_minutes=opts.interval_minutes, daily_time=opts.daily_time,
             library_size=opts.library_size,
         )
@@ -113,6 +116,12 @@ class Gallery:
     @property
     def reframed(self) -> ReframedSource | None:
         return self.source if isinstance(self.source, ReframedSource) else None
+
+    def snapshot(self) -> dict:
+        """Status for the panel. The hidden count is read from the history
+        itself, so hides and un-hides racing from two threads can't leave it
+        stale."""
+        return {**self.status.snapshot(), "hidden_count": len(self.history.hidden)}
 
     # -- requests from the panel and HA (any thread; never block) -----------
 
@@ -124,13 +133,12 @@ class Gallery:
 
     def hide_current(self) -> tuple[bool, str]:
         """Never show the current piece again, then pick a replacement."""
-        key = self.status.get("key")
+        now = self.status.snapshot()           # key and title from the same piece
+        key, title = now.get("key"), now.get("title") or "this piece"
         if not key:
             return False, "Nothing is showing yet"
-        title = self.status.get("title") or "this piece"
         if not self.history.hide(key):
             return False, f"'{title}' is already hidden"
-        self.status.update(hidden_count=len(self.history.hidden))
         log.info("hiding '%s' (%s) - %d hidden in total",
                  title, key, len(self.history.hidden))
         self.intents.request(NEXT)
@@ -138,7 +146,6 @@ class Gallery:
 
     def unhide_all(self) -> tuple[bool, str]:
         count = self.history.unhide_all()
-        self.status.update(hidden_count=0)
         log.info("un-hid %d piece(s)", count)
         return True, (f"{count} piece(s) can appear again" if count
                       else "Nothing was hidden")
@@ -150,9 +157,7 @@ class Gallery:
             return False, "Not a reframed.gallery artwork link"
         if self.reframed is None:
             return False, 'Set Art source to "reframed" to show links'
-        with self._link_lock:
-            self._link = page_url            # a second paste before the loop runs wins
-        self.intents.request(LINK)
+        self.intents.request(LINK, page_url)   # a second paste before the loop runs wins
         return True, "Fetching your piece…"
 
     def set_collection(self, slug: str) -> None:
@@ -175,35 +180,49 @@ class Gallery:
         The first pass runs at once, so a restart doubles as "show now"
         (inside active_hours)."""
         while not self.stop.is_set():
-            now = datetime.now()
-            # Work out the next slot BEFORE doing work, so a long push near the
-            # daily time can't roll the target a day forward and skip a change.
-            wait_s = seconds_until(self.opts.daily_time, now) or self.opts.interval_seconds
+            # Fix the next slot BEFORE doing work and sleep only what's left of it
+            # afterwards, so a long push can neither roll the daily target a day
+            # forward nor push the scheduled change past its time.
+            slot_wait = (seconds_until(self.opts.daily_time, datetime.now())
+                         or self.opts.interval_seconds)
+            deadline = time.monotonic() + slot_wait
             wanted = self.intents.take()
+            if self.stop.is_set():           # shutdown raced the take(); don't start work
+                break
             if LINK in wanted:
-                self._show_link(self._take_link())
+                self._show_link(str(wanted[LINK] or ""))
             elif NEXT in wanted:
-                self._cycle()
+                if self._cycle():
+                    self._retry_at = None
             elif REMAT in wanted:
                 self._remat()
             elif REPUSH in wanted:
                 self._repush()
-            elif within_active_hours(self.opts.active_hours, now):
-                if not self._cycle():
-                    wait_s = min(wait_s, RETRY_SECONDS)
-                    log.info("will try again in %d min", wait_s // 60)
             else:
-                log.info("outside active_hours %s - idling", self.opts.active_hours)
-            self.intents.wait(wait_s)
+                self._scheduled_change()
+            if self.retry_pending:
+                deadline = min(deadline, self._retry_at)
+            if self.stop.is_set():
+                break
+            self.intents.wait(max(0.0, deadline - time.monotonic()))
+
+    @property
+    def retry_pending(self) -> bool:
+        return self._retry_at is not None
+
+    def _scheduled_change(self) -> None:
+        """A timeout: the daily slot, the interval, or a retry came due."""
+        self._retry_at = None
+        if not within_active_hours(self.opts.active_hours, datetime.now()):
+            log.info("outside active_hours %s - idling", self.opts.active_hours)
+            return
+        if not self._cycle():
+            self._retry_at = time.monotonic() + RETRY_SECONDS
+            log.info("will try again in %d min", RETRY_SECONDS // 60)
 
     def shutdown(self) -> None:
         self.stop.set()
         self.intents.interrupt()
-
-    def _take_link(self) -> str:
-        with self._link_lock:
-            link, self._link = self._link, ""
-            return link
 
     # -- the work (loop thread only) ----------------------------------------
 
@@ -232,7 +251,8 @@ class Gallery:
         art, data = gallery.pick(self.opts, self.history, self.source)
         if not art:
             return self._fail("no artwork found (try a broader query or collection)")
-        self._show(art, data)
+        # The pool this piece came from, not whatever the collection is by now.
+        self._show(art, data, collection=getattr(self.source, "last_pool", ""))
         return True
 
     def _show_link(self, page_url: str) -> bool:
@@ -280,18 +300,17 @@ class Gallery:
         log.info("re-pushed current image -> %d/%d TV(s)", ok, len(self.tvs))
         return True
 
-    def _show(self, art, data: bytes, link: str = "") -> None:
+    def _show(self, art, data: bytes, link: str = "", collection: str = "") -> None:
         """Render + push one resolved artwork and publish it everywhere."""
         ok = self._render_and_push(data)
         self.history.add(art.key)
-        showing = self.reframed.active_collection(self.opts) if self.reframed else ""
         self.status.update(title=art.title, artist=art.artist, credit=art.credit,
                            year=art.year, medium=art.medium, movement=art.movement,
                            source=art.source, link=link, key=art.key,
-                           showing_collection="" if link else showing)
+                           showing_collection=collection)
         log.info("showing '%s' by %s (%s) -> %d/%d TV(s)",
                  art.title, art.artist, art.credit, ok, len(self.tvs))
-        snapshot = self.status.snapshot()
+        snapshot = self.snapshot()
         for listener in self.listeners:
             try:
                 listener(art, snapshot)

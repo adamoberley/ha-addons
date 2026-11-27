@@ -36,6 +36,11 @@ def within_active_hours(spec: str, now: datetime) -> bool:
     return start <= cur < end if start < end else (cur >= start or cur < end)
 
 
+# A wake a hair before the slot (clock jitter) counts as the slot itself, so the
+# pass it runs isn't followed by a second change a second later.
+SLOT_GRACE = 2
+
+
 def seconds_until(daily_time: str, now: datetime) -> int | None:
     """Seconds until the next HH:MM (local) occurrence, or None if unset/invalid."""
     if not daily_time:
@@ -46,6 +51,6 @@ def seconds_until(daily_time: str, now: datetime) -> int | None:
         log.warning("bad daily_time %r - using the interval instead", daily_time)
         return None
     target = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
-    if target <= now:
+    if (target - now).total_seconds() < SLOT_GRACE:
         target += timedelta(days=1)
     return max(1, int((target - now).total_seconds()))

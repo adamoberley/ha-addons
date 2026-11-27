@@ -114,14 +114,54 @@ def test_the_first_pass_shows_a_piece_and_records_it(tmp_path):
 
 
 def test_a_failed_scheduled_change_retries_soon(tmp_path):
-    app = make(tmp_path, arts=())
-    assert one_pass(app) == [controller_mod.RETRY_SECONDS]
+    app = make(tmp_path, arts=(), daily_time="")         # interval 24 h, no clock edge
+    (wait,) = one_pass(app)
+    assert controller_mod.RETRY_SECONDS - 5 < wait <= controller_mod.RETRY_SECONDS
     assert app.status.get("last_error").startswith("no artwork found")
+
+
+def test_a_manual_action_does_not_cancel_a_pending_retry(tmp_path):
+    app = make(tmp_path, arts=(), daily_time="")
+    one_pass(app)                                       # scheduled change fails
+    app.repush()
+    (wait,) = one_pass(app)                             # a re-push wakes the loop
+    assert wait <= controller_mod.RETRY_SECONDS         # still due in <= 15 min
+    assert app.retry_pending
+
+
+def test_the_retry_is_cleared_once_it_runs(tmp_path):
+    app = make(tmp_path, arts=(), daily_time="", interval_seconds=6 * 3600)
+    one_pass(app)
+    app.source.arts = [art(1)]
+    assert one_pass(app) == [pytest.approx(6 * 3600, abs=5)]   # retry ran and worked
+    assert not app.retry_pending
+
+
+def test_time_spent_working_comes_off_the_wait(tmp_path, monkeypatch):
+    clock = iter([1000.0, 1400.0])                      # before work, after work
+    monkeypatch.setattr(controller_mod.time, "monotonic", lambda: next(clock))
+    app = make(tmp_path, daily_time="", interval_seconds=3600)
+    app.status.update = lambda **kw: None               # keep time.time() out of it
+    assert one_pass(app) == [3200.0]
+
+
+def test_shutdown_after_taking_requests_starts_no_work(tmp_path):
+    app = make(tmp_path)
+    take = app.intents.take
+
+    def take_then_stop():
+        got = take()
+        app.shutdown()                                  # SIGTERM lands right here
+        return got
+
+    app.intents.take = take_then_stop
+    app.run()
+    assert app.status.get("last_ts") == 0
 
 
 def test_a_good_scheduled_change_waits_for_the_next_slot(tmp_path):
     app = make(tmp_path, daily_time="", interval_seconds=6 * 3600)
-    assert one_pass(app) == [6 * 3600]
+    assert one_pass(app) == [pytest.approx(6 * 3600, abs=5)]
 
 
 def test_outside_active_hours_a_timeout_does_nothing(tmp_path, monkeypatch):
@@ -146,11 +186,10 @@ def test_a_link_beats_a_fresh_pick_and_requests_are_consumed(tmp_path):
     app._cycle = lambda: order.append("cycle") or True
     app.intents.request(controller_mod.NEXT)
     app.intents.request(controller_mod.REPUSH)
-    app._link = "https://www.reframed.gallery/a/b"
-    app.intents.request(controller_mod.LINK)
+    app.intents.request(controller_mod.LINK, "https://www.reframed.gallery/a/b")
     one_pass(app)
     assert order == [("link", "https://www.reframed.gallery/a/b")]
-    assert app.intents.take() == set()           # the rest were dropped, not left over
+    assert app.intents.take() == {}              # the rest were dropped, not left over
 
 
 def test_a_tv_without_art_mode_is_not_counted_as_reached(tmp_path):
@@ -190,17 +229,17 @@ def test_hide_retires_the_piece_and_asks_for_another(tmp_path):
     ok, message = app.hide_current()
     assert ok and message.startswith("Hidden '")
     assert app.history.is_hidden(key)
-    assert app.status.get("hidden_count") == 1
-    assert app.intents.take() == {controller_mod.NEXT}
+    assert app.snapshot()["hidden_count"] == 1
+    assert app.intents.take() == {controller_mod.NEXT: None}
     assert app.hide_current()[0] is False        # already hidden
 
 
 def test_unhide_all_resets_the_count(tmp_path):
     app = make(tmp_path)
     app.history.hide("artic:9")
-    app.status.update(hidden_count=1)
+    assert app.snapshot()["hidden_count"] == 1
     assert app.unhide_all() == (True, "1 piece(s) can appear again")
-    assert app.status.get("hidden_count") == 0
+    assert app.snapshot()["hidden_count"] == 0
 
 
 def test_links_are_validated_and_need_the_reframed_source(tmp_path):
@@ -210,8 +249,9 @@ def test_links_are_validated_and_need_the_reframed_source(tmp_path):
     assert app.queue_link("reframed.gallery/a/b")[0] is False    # artic source
     reframed = make(tmp_path, source=ReframedSource())
     assert reframed.queue_link("reframed.gallery/A/B")[0] is True
-    assert reframed._take_link() == "https://www.reframed.gallery/a/b"
-    assert reframed.intents.take() == {controller_mod.LINK}
+    assert reframed.queue_link("reframed.gallery/C/D")[0] is True   # the later paste wins
+    assert reframed.intents.take() == {
+        controller_mod.LINK: "https://www.reframed.gallery/c/d"}
 
 
 def test_a_matte_change_re_frames_the_same_piece(tmp_path):
@@ -234,9 +274,12 @@ def test_repush_sends_the_preview_with_the_matte_it_was_rendered_with(tmp_path):
     one_pass(app)
     assert tv.pushes == []                        # nothing shown yet
     one_pass(app)                                 # a scheduled change
+    assert len(tv.pushes) == 1
+    app.status.update(matte="modern_polar")       # the live matte moves on...
     app.repush()
     one_pass(app)
-    assert tv.pushes[-1] == (Path(app.preview_path).read_bytes(), "none")
+    assert len(tv.pushes) == 2                    # ...the re-push really happened,
+    assert tv.pushes[-1] == (Path(app.preview_path).read_bytes(), "none")   # as rendered
 
 
 def test_a_collection_change_switches_the_source_and_picks_again(tmp_path):
@@ -245,4 +288,12 @@ def test_a_collection_change_switches_the_source_and_picks_again(tmp_path):
     app.set_collection("by-the-sea")
     assert src.override == "by-the-sea"
     assert app.status.get("collection") == "by-the-sea"
-    assert app.intents.take() == {controller_mod.NEXT}
+    assert app.intents.take() == {controller_mod.NEXT: None}
+
+
+def test_the_collection_shown_is_the_pool_the_piece_came_from(tmp_path):
+    src = FakeSource([art(1)])
+    src.last_pool = "fall"
+    app = make(tmp_path, source=src)
+    one_pass(app)
+    assert app.status.get("showing_collection") == "fall"

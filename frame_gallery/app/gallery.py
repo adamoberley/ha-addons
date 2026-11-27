@@ -35,7 +35,7 @@ _broken: set[str] = set()
 
 def download(url: str) -> bytes | None:
     """Image bytes, or None if they won't come."""
-    r = net.get(url, timeout=60, attempts=2)
+    r = net.get(url, timeout=30, attempts=2)
     return (r.content or None) if r is not None else None
 
 
