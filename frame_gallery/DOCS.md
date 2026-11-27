@@ -1,33 +1,37 @@
-# Frame Gallery
+# REFRAMED Gallery
 
 Curated **public-domain art on your Samsung Frame TV**, changed on its own
-interval — no Google/Bing, no automation, no pile-up, no repeats, and content
+schedule — no Google/Bing, no automation, no pile-up, no repeats, and content
 you control.
 
 ## Why this instead of the older art-changers
 
-| Old art-changer | Frame Gallery |
+| Old art-changer | REFRAMED Gallery |
 | --- | --- |
 | **Unpredictable, sometimes mature** images from Google Art | Public-domain museum art + a keyword content filter + a search to shape the collection |
-| The **same pieces** over and over | Remembers the last *N* shown; never repeats until the pool is exhausted |
-| Uploads **pile up** in the art library | A **bounded** library: one image swapped in place, or the last *N* days kept on purpose |
+| The **same pieces** over and over | Remembers the last *N* shown; never repeats until the collection is exhausted, then repeats the longest-ago piece |
+| Uploads **pile up** in the art library | You choose: one image swapped in place, the last *N* days kept, or every piece kept |
 | Needed an **automation** to run | A long-running service with its own interval |
 
 ## How it works
 
-Each interval — or when you press **Show next** on the panel — it:
+At the daily switch time (or each interval) — or when you press **Show next** on
+the panel — it:
 
-1. asks an open museum API for a batch of works;
-2. filters them (public-domain, keyword blocklist, not shown recently);
-3. downloads one and fits it to your panel (matted like a framed print, or
-   cropped to fill);
-4. pushes it to the Frame, deleting its own oldest upload once the art library is
-   full (by default that's the one piece it replaces).
+1. asks its source for a batch of works: **[reframed.gallery](https://www.reframed.gallery)**'s
+   curated, Frame-ready collections by default, or the **Art Institute of
+   Chicago**'s public-domain catalogue;
+2. filters them (public domain, keyword blocklist, hidden pieces, not shown
+   recently);
+3. downloads one, checks the image is whole (a damaged file is skipped), and fits
+   it to your panel (cropped to fill, or matted like a framed print);
+4. pushes it to the Frame, deleting its own oldest upload once the art library
+   holds as many pieces as you asked it to keep (by default, one).
 
 The push is Art-Mode-aware: if you're watching TV it just sets the next art
-without interrupting; switch to Art Mode to see it. Source for v0.1: the **Art
-Institute of Chicago** (no key, CC0 IIIF images). More can be added — the source
-layer is a plug-in.
+without interrupting; switch to Art Mode to see it. If a scheduled change finds
+nothing usable (the source is down, say), it tries again 15 minutes later rather
+than waiting a day.
 
 ## Setup
 
@@ -57,8 +61,8 @@ layer is a plug-in.
 | **Fit** | `crop` | `crop` fills the panel and trims the edges; `matte` frames the whole work on a mat (nothing cropped). |
 | **Mat color** | `#141414` | Background behind matted art (hex). Dark avoids glare at night. |
 | **TV matte** (`tv_matte`) | `none` | `none` keeps the in-image fit; or a Samsung matte id (e.g. `modern_apricot`, `shadowbox_polar`) to have the **TV render a real mat** (art sent full-bleed). Unsupported ids fall back to none. |
-| **Art library size** (`library_size`) | 1 | How many pieces to keep in the TV's own art library. `1` replaces the art in place (one image, no pile-up). Set `7` to keep a week on the TV so you can browse back through past days with the remote — the oldest is deleted as a new one arrives. Only images this app uploaded are ever removed. |
-| **No-repeat memory** | 2000 | Don't repeat the last *N* pieces (0 = allow repeats). |
+| **Pieces to keep on the TV** (`library_size`) | 1 | How many pieces stay in the TV's own art library. `1` replaces yesterday's art with today's (one image, no pile-up). `7` keeps a week you can browse back through with the remote, deleting the oldest as a new one arrives. `0` keeps every piece and never deletes. Only images this app uploaded are ever removed. |
+| **No-repeat memory** | 2000 | Don't repeat the last *N* pieces (0 = allow repeats). When a collection is smaller than this and everything has been shown, the piece shown longest ago comes back. |
 | **Active hours** | *(blank)* | Blank = 24/7, or a local-time window like `07:00-23:00`. |
 | **Panel resolution** | 3840x2160 | Match your panel (1920x1080 for 32"/pre-2021). |
 | **Frame TV IP(s)** | *(blank)* | Blank = auto-discover; or comma-separated IPs to override. |
@@ -66,9 +70,11 @@ layer is a plug-in.
 
 The sidebar **REFRAMED Gallery** panel shows the current piece with its full
 details (title · artist · year · medium · movement, with Wikipedia links), a
-status pill with how many TVs were reached and when art last changed, and two
-buttons: **Show next** (pick a new piece) and **Re-push to TV** (re-send the
-current one, handy if a TV was off or got switched away).
+status pill with how many TVs were reached and when art last changed, chips for
+the collection (with what `seasonal`/`weather` resolved to, e.g. *seasonal ·
+fall*), and three buttons: **Show next** (pick a new piece), **Re-push to TV**
+(re-send the current one, handy if a TV was off or got switched away) and
+**Never show this** (below).
 
 ## Showing one specific piece
 
@@ -136,12 +142,23 @@ actions:
 
 ## Keeping past days on the TV
 
-By default the app replaces its upload in place, so the Frame's art library holds
-exactly one of its images — tidy, but there's nothing to flick back to. Set
-**Art library size** to keep more: at `7`, the last seven pieces stay in the TV's
-library and you can browse them with the remote, with the oldest deleted as each
-new one arrives. Your own uploads and the Samsung Art Store pieces are untouched —
-the app only ever deletes images it uploaded itself.
+By default each day's piece replaces yesterday's, so the Frame's art library
+holds exactly one of this app's images — tidy, but there's nothing to flick back
+to. Set **Pieces to keep on the TV** (`library_size`, on the app's Configuration
+tab) to keep more:
+
+| Setting | What stays on the TV |
+| --- | --- |
+| `1` (default) | Today's piece only; yesterday's is deleted. |
+| `7`, `30`, … | The last 7 (or 30, …) pieces; the oldest is deleted as each new one arrives. |
+| `0` | Every piece, forever. Nothing is deleted. |
+
+Browse them on the TV with the remote in Art Mode. A 4K piece takes about 4 MB
+of the TV's storage, so with `0` the library grows by roughly 1.5 GB a year; if
+the TV runs out of space, uploads fail and the panel shows "No TVs reached".
+Lowering the number later deletes the surplus on the next change. Your own
+uploads and Samsung Art Store pieces are never touched — the app only ever
+deletes images it uploaded itself.
 
 ## Home Assistant entities (MQTT)
 
@@ -153,7 +170,7 @@ exposes these over MQTT discovery:
   attributes (great for a dashboard card or TTS).
 - **Next** button — change to a fresh piece now.
 - **Collection** select — switch collection (incl. `seasonal` / `weather`) live.
-- **Matte** select — switch the TV-rendered matte live.
+- **Matte** select — switch the TV-rendered matte live (`off` = no TV matte).
 - **Show link** text — set a reframed.gallery artwork URL to put that exact piece
   on the TV now.
 - **Hide current art** button — retire the piece that's showing (it never comes
@@ -197,8 +214,11 @@ extremely unlikely. Tighten `query` if you want a guaranteed-tame collection.
   until you do), then restart.
 - **Image is set but the TV doesn't switch to it** — it uses Art-Mode-aware
   pushing; switch the TV to Art Mode to see it.
-- **"no artwork found"** — your `query` is too narrow or everything matched a
-  blocked keyword; broaden or clear `query`.
+- **"no artwork found"** — your `query` is too narrow, or everything matched a
+  blocked keyword or the hidden list; broaden or clear `query`. (A collection
+  that has simply shown everything repeats its longest-ago piece instead.)
+- **"damaged"** in the log — the source served a broken image file. The app
+  skips that piece until it restarts; nothing to do.
 - **TV not found** — set **Frame TV IP(s)** manually (the Samsung TV integration
   must be configured, or pass the IP).
 - **Rate-limited source** — transient; it backs off and retries next cycle. Set
@@ -207,5 +227,6 @@ extremely unlikely. Tighten `query` if you want a guaranteed-tame collection.
 ## Credits
 
 Talks to the TV with [`samsungtvws`](https://github.com/NickWaterton/samsung-tv-ws-api).
-Art via the [Art Institute of Chicago API](https://api.artic.edu/docs/)
-(public domain / CC0). Not affiliated with the museum.
+Art via [reframed.gallery](https://www.reframed.gallery) and the
+[Art Institute of Chicago API](https://api.artic.edu/docs/) (public domain /
+CC0). Not affiliated with either.

@@ -9,12 +9,16 @@ Two pieces of memory, both in ``/data/gallery-state.json``:
     public-domain collection still contains work you don't want on your living
     room wall for the next month, and the alternative was editing keyword
     filters until it went away. One button, gone for good.
+
+The scheduler adds to ``recent`` while the panel and HA hide pieces from their
+own threads, so every change and save happens under one lock.
 """
 from __future__ import annotations
 
 import json
 import logging
 import os
+import threading
 
 log = logging.getLogger("frame-gallery.state")
 
@@ -24,6 +28,7 @@ STATE_PATH = "/data/gallery-state.json"
 class History:
     def __init__(self, cap: int) -> None:
         self.cap = max(0, cap)
+        self._lock = threading.Lock()
         data = self._load()
         self.recent: list = list(data.get("recent", []))
         self.hidden: set[str] = {str(k) for k in data.get("hidden", []) if k}
@@ -41,6 +46,7 @@ class History:
         return {}
 
     def _save(self) -> None:
+        """Write both lists atomically. Callers hold the lock."""
         tmp = STATE_PATH + ".tmp"
         try:
             with open(tmp, "w", encoding="utf-8") as fh:
@@ -57,18 +63,20 @@ class History:
     def oldest_first(self, arts: list) -> list:
         """`arts` ordered by when each was last shown, longest ago first
         (anything never shown, or long forgotten, leads)."""
-        rank = {k: i for i, k in enumerate(self.recent)}
+        with self._lock:
+            rank = {k: i for i, k in enumerate(self.recent)}
         return sorted(arts, key=lambda a: rank.get(a.key, -1))
 
     def add(self, key: str) -> None:
         if self.cap <= 0:
             return
-        if key in self.recent:
-            self.recent.remove(key)
-        self.recent.append(key)
-        if len(self.recent) > self.cap:
-            self.recent = self.recent[-self.cap:]
-        self._save()
+        with self._lock:
+            if key in self.recent:
+                self.recent.remove(key)
+            self.recent.append(key)
+            if len(self.recent) > self.cap:
+                self.recent = self.recent[-self.cap:]
+            self._save()
 
     # -- the hidden list ---------------------------------------------------
 
@@ -77,16 +85,20 @@ class History:
 
     def hide(self, key: str) -> bool:
         """Never show this piece again. False if it was already hidden."""
-        if not key or key in self.hidden:
+        if not key:
             return False
-        self.hidden.add(key)
-        self._save()
+        with self._lock:
+            if key in self.hidden:
+                return False
+            self.hidden.add(key)
+            self._save()
         return True
 
     def unhide_all(self) -> int:
         """Forget every hidden piece. Returns how many came back."""
-        count = len(self.hidden)
-        if count:
-            self.hidden.clear()
-            self._save()
+        with self._lock:
+            count = len(self.hidden)
+            if count:
+                self.hidden.clear()
+                self._save()
         return count

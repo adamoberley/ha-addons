@@ -1,9 +1,10 @@
 """Fit an artwork to the TV panel and encode JPEG.
 
-Museum art is all aspect ratios; the Frame is 16:9. Two modes:
-  matte (default) - the whole work shown, centered on a coloured mat with a
-                    small border, like a framed print. Nothing is cropped.
-  crop            - scale to cover the panel and center-crop the overflow.
+Museum art is all aspect ratios; the Frame is 16:9. Two modes (the `fit` option;
+the app defaults to crop):
+  matte - the whole work shown, centered on a coloured mat with a small border,
+          like a framed print. Nothing is cropped.
+  crop  - scale to cover the panel and center-crop the overflow.
 """
 from __future__ import annotations
 

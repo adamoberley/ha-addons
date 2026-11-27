@@ -10,9 +10,8 @@ from __future__ import annotations
 
 import logging
 import random
-import time
 
-import requests
+import net
 
 from sources.base import ArtSource, Artwork
 
@@ -25,10 +24,8 @@ MAX_PAGE = 100            # offset cap (page*limit <= ~10000 per the AIC API)
 FIELDS = ("id,title,artist_title,image_id,is_public_domain,"
           "department_title,classification_titles,term_titles,"
           "date_display,medium_display,style_title,short_description")
-HEADERS = {
-    "User-Agent": "ha-addons/0.1 (+https://github.com/adamoberley/ha-addons)",
-    "AIC-User-Agent": "ha-addons (adamoberley@damascus.net)",
-}
+# The AIC asks API clients to identify themselves with a contact.
+HEADERS = {"AIC-User-Agent": "ha-addons (adamoberley@damascus.net)"}
 
 
 class ArticSource(ArtSource):
@@ -40,22 +37,15 @@ class ArticSource(ArtSource):
         self._total_pages: dict[str, int] = {}
 
     def _get(self, url, params):
-        """GET with a short backoff on 403/429 (AIC's Cloudflare rate-limits
-        bursts). Returns parsed JSON, or None on persistent failure."""
-        for attempt in range(3):
-            try:
-                r = requests.get(url, params=params, headers=HEADERS, timeout=20)
-                if r.status_code in (403, 429) and attempt < 2:
-                    time.sleep(2 * (attempt + 1))
-                    continue
-                r.raise_for_status()
-                return r.json()
-            except (requests.RequestException, ValueError) as exc:
-                if attempt < 2:
-                    time.sleep(2)
-                    continue
-                log.warning("Art Institute request failed: %s", exc)
-        return None
+        """Parsed JSON, or None on persistent failure."""
+        r = net.get(url, params=params, headers=HEADERS)
+        if r is None:
+            return None
+        try:
+            return r.json()
+        except ValueError as exc:
+            log.warning("Art Institute sent something that isn't JSON: %s", exc)
+            return None
 
     def candidates(self, opts, count: int = 100) -> list[Artwork]:
         url = (BASE + "/search") if opts.query else BASE

@@ -4,7 +4,8 @@ Built on samsungtvws (the library the core samsungtv integration uses). The
 point over a generic art-changer: uploads do NOT pile up without limit. We keep
 the last `library_size` images we uploaded (1 = the original replace-in-place
 behaviour) and delete only what falls off the end - so you can keep a few days of
-art on the TV to flick back through, without the library growing forever.
+art on the TV to flick back through, without the library growing forever. 0
+keeps every upload (nothing is ever deleted), for anyone who wants that.
 
 Safety ordering, per TV:
   1. upload + select the NEW image      (throws -> change nothing; old stays up)
@@ -67,7 +68,7 @@ class FrameTV:
         self.host = host
         self.matte = matte or "none"
         self.mac = mac or ""          # optional, enables Wake-on-LAN on retry
-        self.library_size = max(1, int(library_size or 1))
+        self.library_size = max(0, int(library_size))   # 0 = keep every upload
         self.token_file = f"/data/tv-token-{_safe(host)}.txt"
         self.state_file = f"/data/tv-state-{_safe(host)}.json"
         self.state = self._load_state()
@@ -132,7 +133,6 @@ class FrameTV:
         there's time to tap 'Allow'; once paired, a short timeout keeps a sleeping
         TV from stalling the scheduler thread."""
         timeout = CONNECT_TIMEOUT if os.path.exists(self.token_file) else PAIR_TIMEOUT
-        last_exc: Exception | None = None
         for attempt in range(CONNECT_RETRIES + 1):
             if attempt and self.mac:
                 log.info("%s: Wake-on-LAN nudge before retry %d", self.host, attempt)
@@ -155,16 +155,12 @@ class FrameTV:
                 raise               # TV gave a definitive answer; retrying won't help
             except Exception as exc:
                 self._close(art, tv)
-                last_exc = exc
-                if attempt < CONNECT_RETRIES:
-                    log.warning("%s: connect failed (%s); retrying in %.0fs",
-                                self.host, exc, CONNECT_BACKOFF)
-                    time.sleep(CONNECT_BACKOFF)
-                    continue
-                raise
-        if last_exc:                # defensive; loop above always returns or raises
-            raise last_exc
-        return None
+                if attempt == CONNECT_RETRIES:
+                    raise
+                log.warning("%s: connect failed (%s); retrying in %.0fs",
+                            self.host, exc, CONNECT_BACKOFF)
+                time.sleep(CONNECT_BACKOFF)
+        raise AssertionError("unreachable: the last attempt returns or raises")
 
     @staticmethod
     def _close(art, tv) -> None:
@@ -192,10 +188,10 @@ class FrameTV:
 
         # Keep the newest `library_size` of our uploads on the TV; anything older
         # falls off the end and is queued for deletion. Shrinking the option
-        # evicts the surplus on the next push.
+        # evicts the surplus on the next push; 0 never evicts.
         library = [cid for cid in self.state.get("library", []) if cid != new_id]
         library.append(new_id)
-        evicted, library = library[:-self.library_size], library[-self.library_size:]
+        library, evicted = self._split_library(library, self.library_size)
         self.state["library"] = library
         self.state["current_content_id"] = new_id
         for cid in evicted:
@@ -204,10 +200,17 @@ class FrameTV:
         self._save_state()
 
         self._drain_deletes(art, keep=set(library))
-        if self.library_size > 1:
-            log.info("%s: art library at %d/%d image(s)",
-                     self.host, len(library), self.library_size)
+        if self.library_size != 1:
+            log.info("%s: art library at %d/%s image(s)", self.host, len(library),
+                     self.library_size or "unlimited")
         return new_id
+
+    @staticmethod
+    def _split_library(library: list, size: int) -> tuple[list, list]:
+        """(kept, evicted): the newest `size` uploads stay; 0 keeps them all."""
+        if size <= 0:
+            return library, []
+        return library[-size:], library[:-size]
 
     def _upload(self, art, jpeg: bytes, matte: str) -> str | None:
         """Single upload attempt. Both mattes must match (a mismatch makes 2022+

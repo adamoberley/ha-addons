@@ -123,7 +123,7 @@ def test_a_corrupt_state_file_starts_fresh(tmp_path, monkeypatch):
 @pytest.fixture(autouse=True)
 def any_bytes_decode(monkeypatch):
     """These tests serve placeholder bytes; image checking has its own tests."""
-    monkeypatch.setattr(gallery_mod, "_decodes", lambda data: True)
+    monkeypatch.setattr(gallery_mod, "decodes", lambda data: True)
     monkeypatch.setattr(gallery_mod, "_broken", set())
 
 
@@ -154,7 +154,7 @@ def test_pick_skips_hidden_pieces(store, monkeypatch):
     store.hide("fake:1")
 
     for _ in range(6):                   # the picker shuffles; never pick the hidden one
-        chosen, data = gallery_mod.pick(Opts(), store, [FakeSource(works)])
+        chosen, data = gallery_mod.pick(Opts(), store, FakeSource(works))
         assert (chosen.key, data) == ("fake:2", b"jpeg-bytes")
 
 
@@ -162,7 +162,7 @@ def test_pick_gives_up_when_everything_is_hidden(store, monkeypatch):
     monkeypatch.setattr(gallery_mod, "download", lambda url: b"jpeg-bytes")
     store.hide("fake:1")
 
-    chosen, data = gallery_mod.pick(Opts(), store, [FakeSource([art(1)])], tries=1)
+    chosen, data = gallery_mod.pick(Opts(), store, FakeSource([art(1)]), tries=1)
     assert (chosen, data) == (None, None)
 
 
@@ -170,5 +170,5 @@ def test_pick_skips_recently_shown_pieces_too(store, monkeypatch):
     monkeypatch.setattr(gallery_mod, "download", lambda url: b"jpeg-bytes")
     store.add("fake:1")
 
-    chosen, _ = gallery_mod.pick(Opts(), store, [FakeSource([art(1), art(2)])])
+    chosen, _ = gallery_mod.pick(Opts(), store, FakeSource([art(1), art(2)]))
     assert chosen.key == "fake:2"

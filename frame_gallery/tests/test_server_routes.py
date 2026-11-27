@@ -17,19 +17,46 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app"))
 
 import server as server_mod
+from controller import Status
+
+
+class FakeGallery:
+    """Just the surface the panel drives; records what it was asked."""
+
+    def __init__(self, preview_path: str, **status) -> None:
+        self.calls: list = []
+        self.preview_path = preview_path
+        self.status = Status(**{
+            "busy": False, "last_ts": 1_757_000_000, "last_error": None, "note": None,
+            "title": "Wheatfield", "artist": "Someone", "key": "artic:42",
+            "hidden_count": 0, "tv_count": 1, "tv_ok": 1, **status})
+        self.hide_result = (True, "Hidden 'Wheatfield' - picking another")
+
+    def show_next(self):
+        self.calls.append("next")
+
+    def repush(self):
+        self.calls.append("repush")
+
+    def hide_current(self):
+        self.calls.append("hide")
+        return self.hide_result
+
+    def unhide_all(self):
+        self.calls.append("unhide")
+        return True, "3 piece(s) can appear again"
+
+    def queue_link(self, raw):
+        self.calls.append(("link", raw))
+        if "reframed.gallery/" in raw:
+            return True, "Fetching your piece…"
+        return False, "Not a reframed.gallery artwork link"
 
 
 class Panel:
-    """A running panel plus the events/callbacks it drives."""
-
-    def __init__(self, status: dict, **kwargs):
-        self.trigger = threading.Event()
-        self.repush = threading.Event()
-        self.wake = threading.Event()
-        self.status = status
-        self.httpd = server_mod.make_server(
-            self.trigger, status, self.repush, self.wake, host="127.0.0.1", port=0, **kwargs
-        )
+    def __init__(self, app: FakeGallery) -> None:
+        self.app = app
+        self.httpd = server_mod.make_server(app, host="127.0.0.1", port=0)
         self.port = self.httpd.server_address[1]
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
 
@@ -55,96 +82,84 @@ class Panel:
         self.httpd.server_close()
 
 
-def status_dict(**overrides) -> dict:
-    base = {
-        "busy": False, "last_ts": 1_757_000_000, "last_error": None, "note": None,
-        "title": "Wheatfield", "artist": "Someone", "key": "artic:42",
-        "hidden_count": 0, "tv_count": 1, "tv_ok": 1, "_debug": False,
-    }
-    base.update(overrides)
-    return base
-
-
 @pytest.fixture
-def hide_calls():
-    return []
-
-
-@pytest.fixture
-def panel(hide_calls):
-    def on_hide():
-        hide_calls.append("hide")
-        return True, "Hidden 'Wheatfield' - picking another"
-
-    def on_unhide():
-        hide_calls.append("unhide")
-        return True, "3 piece(s) can appear again"
-
-    p = Panel(status_dict(), on_hide=on_hide, on_unhide=on_unhide)
+def panel(tmp_path):
+    p = Panel(FakeGallery(str(tmp_path / "last.jpg")))
     yield p
     p.close()
 
 
-def test_hide_calls_through_and_answers_the_click(panel, hide_calls):
+def test_hide_calls_through_and_answers_the_click(panel):
     code, body = panel.post("/hide")
     assert code == 200
     assert json.loads(body) == {"ok": True, "message": "Hidden 'Wheatfield' - picking another"}
-    assert hide_calls == ["hide"]
+    assert panel.app.calls == ["hide"]
 
 
-def test_unhide_calls_through(panel, hide_calls):
+def test_unhide_calls_through(panel):
     code, body = panel.post("/unhide")
     assert code == 200
     assert json.loads(body)["ok"] is True
-    assert hide_calls == ["unhide"]
+    assert panel.app.calls == ["unhide"]
 
 
-def test_a_refused_hide_answers_400_with_the_reason():
-    p = Panel(status_dict(key=""), on_hide=lambda: (False, "Nothing is showing yet"))
-    try:
-        code, body = p.post("/hide")
-        assert code == 400
-        assert json.loads(body) == {"ok": False, "message": "Nothing is showing yet"}
-    finally:
-        p.close()
+def test_a_refused_hide_answers_400_with_the_reason(panel):
+    panel.app.hide_result = (False, "Nothing is showing yet")
+    code, body = panel.post("/hide")
+    assert code == 400
+    assert json.loads(body) == {"ok": False, "message": "Nothing is showing yet"}
 
 
-def test_hide_without_a_handler_is_reported_not_available():
-    p = Panel(status_dict())
-    try:
-        code, body = p.post("/hide")
-        assert code == 400
-        assert json.loads(body)["message"] == "not available"
-    finally:
-        p.close()
-
-
-def test_status_exposes_the_hidden_count_and_hides_private_keys(panel):
-    panel.status["hidden_count"] = 4
+def test_status_is_the_gallery_status(panel):
+    panel.app.status.update(hidden_count=4)
     code, body = panel.get("/status")
     data = json.loads(body)
     assert code == 200
     assert data["hidden_count"] == 4
     assert data["key"] == "artic:42"
-    assert not [k for k in data if k.startswith("_")]
 
 
-def test_next_and_repush_still_set_their_events(panel):
+def test_next_and_repush_ask_the_gallery(panel):
     assert panel.post("/next")[0] == 200
-    assert panel.trigger.is_set() and panel.wake.is_set()
-    panel.wake.clear()
     assert panel.post("/repush")[0] == 200
-    assert panel.repush.is_set() and panel.wake.is_set()
+    assert panel.app.calls == ["next", "repush"]
 
 
-def test_the_panel_and_healthz_are_served(panel):
+def test_show_passes_the_form_field_and_relays_the_answer(panel):
+    code, body = panel.post("/show", b"url=https%3A%2F%2Fwww.reframed.gallery%2Fa%2Fb")
+    assert (code, json.loads(body)["accepted"]) == (200, True)
+    code, body = panel.post("/show", b"url=https%3A%2F%2Fexample.com%2F")
+    assert code == 400
+    assert json.loads(body)["message"] == "Not a reframed.gallery artwork link"
+    assert panel.app.calls[0] == ("link", "https://www.reframed.gallery/a/b")
+
+
+def test_the_panel_page_is_served(panel):
     code, body = panel.get("/")
     assert code == 200
-    assert b"Never show this" in body        # the new button ships in the page
+    assert b"Never show this" in body
+    assert rb"match(/\d{4}/)" in body           # the year regex survived the move to a file
 
-    code, body = panel.get("/healthz")
-    assert (code, json.loads(body)["status"]) == (200, "ok")
+
+def test_preview_is_404_until_something_is_shown_then_served(panel):
+    assert panel.get("/preview.jpg")[0] == 404
+    Path(panel.app.preview_path).write_bytes(b"\xff\xd8jpeg")
+    assert panel.get("/preview.jpg") == (200, b"\xff\xd8jpeg")
 
 
 def test_an_unknown_path_is_404(panel):
     assert panel.get("/nope")[0] == 404
+    assert panel.post("/nope")[0] == 404
+
+
+@pytest.mark.parametrize(("status", "expected"), [
+    ({"last_ts": 0}, (200, "starting")),
+    ({}, (200, "ok")),
+    ({"tv_count": 2, "tv_ok": 1}, (200, "ok")),           # partial push is healthy
+    ({"tv_ok": 0}, (503, "degraded")),                     # reached no TV
+    ({"last_error": "boom"}, (503, "degraded")),
+])
+def test_healthz(status, expected):
+    base = {"last_ts": 1, "last_error": None, "tv_count": 1, "tv_ok": 1, **status}
+    code, body = server_mod.health(base)
+    assert (code, body["status"]) == expected

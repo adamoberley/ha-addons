@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.8.0 — 2026-11-27
+
+- **Keep every piece on the TV, if you like.** *Pieces to keep on the TV*
+  (`library_size`, formerly *Art library size*) now takes `0` = keep every piece
+  and never delete, alongside `1` (today's piece replaces yesterday's, the
+  default) and any number up to 1000 (keep the last N days to browse back
+  through with the remote).
+- **A failed change is retried in 15 minutes** instead of the next day. Before,
+  if the 04:00 change found nothing (the source was down, say), the TV kept
+  yesterday's art for another whole day.
+- **The HA Matte select shows "off"** when no TV matte is set. It used to sit at
+  *unknown*: Home Assistant reads an MQTT select value of `none` as "nothing
+  selected". Choosing `off` turns the TV matte off; automations that set a
+  named matte are unaffected.
+- **A TV without Art Mode no longer counts as reached** in the panel's TV
+  count.
+- The panel's Collection chip shows what `seasonal`/`weather` resolved to, e.g.
+  *seasonal · fall*.
+- Under the hood: the app was restructured from one 400-line function into a
+  gallery controller (the actions and the loop), a schedule module and a thin
+  entry point. The panel page is its own file, the art sources share one HTTP
+  helper, and state shared between the panel, HA and the loop is now locked.
+  Tests went from 33 to 78 (new: schedule, controller, MQTT entities, TV
+  library). Entity ids, topics, `/data` files and options are unchanged.
+
 ## 0.7.2 — 2026-11-27
 
 - **Art changes again.** One fall piece on reframed.gallery (*Autumn Landscape*

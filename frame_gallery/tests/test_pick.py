@@ -61,23 +61,23 @@ def images(monkeypatch):
         return served.get(url)
 
     monkeypatch.setattr(gallery_mod, "download", download)
-    monkeypatch.setattr(gallery_mod, "_decodes", lambda data: data == GOOD)
+    monkeypatch.setattr(gallery_mod, "decodes", lambda data: data == GOOD)
     monkeypatch.setattr(gallery_mod, "_broken", set())
     return SimpleNamespace(served=served, calls=calls)
 
 
 def test_a_damaged_image_is_skipped_for_a_good_one(history, images):
     images.served.update({"https://img/1.jpg": BAD, "https://img/2.jpg": GOOD})
-    chosen, data = gallery_mod.pick(OPTS, history, [FakeSource([art(1), art(2)])])
+    chosen, data = gallery_mod.pick(OPTS, history, FakeSource([art(1), art(2)]))
     assert chosen.key == "t:2" and data == GOOD
 
 
 def test_a_damaged_image_is_not_downloaded_again(history, images):
     images.served["https://img/1.jpg"] = BAD
     src = FakeSource([art(1)])
-    assert gallery_mod.pick(OPTS, history, [src]) == (None, None)
+    assert gallery_mod.pick(OPTS, history, src) == (None, None)
     assert images.calls == ["https://img/1.jpg"]       # once, not once per try
-    gallery_mod.pick(OPTS, history, [src])
+    gallery_mod.pick(OPTS, history, src)
     assert images.calls == ["https://img/1.jpg"]       # nor on the next cycle
 
 
@@ -86,7 +86,7 @@ def test_an_exhausted_collection_repeats_the_longest_ago_piece(history, images):
         images.served[f"https://img/{n}.jpg"] = GOOD
     for key in ("t:2", "t:1", "t:3"):                  # t:2 shown longest ago
         history.add(key)
-    chosen, _ = gallery_mod.pick(OPTS, history, [FakeSource([art(1), art(2), art(3)])])
+    chosen, _ = gallery_mod.pick(OPTS, history, FakeSource([art(1), art(2), art(3)]))
     assert chosen.key == "t:2"
 
 
@@ -98,14 +98,14 @@ def test_the_stuck_case_from_the_logs(history, images):
     history.add("t:1")
     history.add("t:2")
     chosen, data = gallery_mod.pick(OPTS, history,
-                                    [FakeSource([art(1), art(2), art(3)])])
+                                    FakeSource([art(1), art(2), art(3)]))
     assert chosen.key == "t:1" and data == GOOD
 
 
 def test_unseen_pieces_still_win_over_repeats(history, images):
     images.served.update({"https://img/1.jpg": GOOD, "https://img/2.jpg": GOOD})
     history.add("t:1")
-    chosen, _ = gallery_mod.pick(OPTS, history, [FakeSource([art(1), art(2)])])
+    chosen, _ = gallery_mod.pick(OPTS, history, FakeSource([art(1), art(2)]))
     assert chosen.key == "t:2"
 
 
@@ -113,12 +113,12 @@ def test_hidden_pieces_are_never_the_fallback(history, images):
     images.served["https://img/1.jpg"] = GOOD
     history.add("t:1")
     history.hide("t:1")
-    assert gallery_mod.pick(OPTS, history, [FakeSource([art(1)])]) == (None, None)
+    assert gallery_mod.pick(OPTS, history, FakeSource([art(1)])) == (None, None)
 
 
 def test_a_truncated_jpeg_does_not_decode():
-    pil = pytest.importorskip("PIL.Image")
     import imaging
+    from PIL import Image as pil
 
     buf = BytesIO()
     pil.new("RGB", (64, 64), (200, 120, 40)).save(buf, format="JPEG")
