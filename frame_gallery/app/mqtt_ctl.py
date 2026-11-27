@@ -1,17 +1,16 @@
 """Expose REFRAMED Gallery to Home Assistant over MQTT (optional, automatable).
 
 Publishes via MQTT discovery (auto-detecting the Mosquitto broker, or a manual
-host), and subscribes to the command topics so HA can drive the app:
-  - sensor.reframed_gallery_current_art  - current title (+ artist/year/medium/... attrs)
-  - button.reframed_gallery_next         - press to change art now
+host), and subscribes to the command topics so HA can drive the gallery:
+  - sensor.reframed_gallery_current_art  - current title (+ artist/year/... attrs)
+  - button.reframed_gallery_next         - change art now
   - select.reframed_gallery_collection   - switch season/collection live
   - select.reframed_gallery_matte        - switch the TV-rendered matte live
-  - text.reframed_gallery_show_link      - set a reframed.gallery artwork URL to
-                                           put that exact piece on the TV
-  - button.reframed_gallery_hide         - press to hide the piece that's showing
-                                           for good and put another one up
+  - text.reframed_gallery_show_link      - put one reframed.gallery URL up now
+  - button.reframed_gallery_hide         - hide what's showing for good, show another
 
-If MQTT is unavailable the app still runs (the panel + interval are unaffected).
+Topics, unique ids and object ids are unchanged since 0.6, so existing entities
+and automations keep working. If MQTT is unavailable the app still runs.
 """
 from __future__ import annotations
 
@@ -45,45 +44,75 @@ SELECT_OPTIONS = ["seasonal", "weather", "all", "winter", "spring-blossoms",
                   "in-bloom", "mountains-valleys", "wild-seas"]
 
 # Offered in the HA "Matte" select - common Samsung matte ids (<style>_<color>).
-# "none" keeps the in-image fit; the rest let the TV render the mat. Exact
-# availability varies by Frame model/year; an unsupported id falls back to none.
-MATTE_OPTIONS = ["none", "modern_polar", "modern_apricot", "modern_black",
+# HA's MQTT select reads the payload "none" as "no option selected" (the entity
+# went to unknown), so the no-matte choice is called "off" on the HA side only.
+NO_MATTE = "off"
+MATTE_OPTIONS = [NO_MATTE, "modern_polar", "modern_apricot", "modern_black",
                  "shadowbox_polar", "shadowbox_black", "flexible_polar"]
 
 
-def _new_client(mqtt):
-    """A paho client that works on both 1.x and 2.x.
+def _matte_to_ha(matte: str) -> str:
+    return NO_MATTE if (matte or "none") == "none" else matte
 
-    paho-mqtt 2.0 made the callback API version explicit and refuses to build a
-    client without one; asking for VERSION1 keeps the callback signatures below
-    valid on either major, so the pin can move without a rewrite.
-    """
-    if hasattr(mqtt, "CallbackAPIVersion"):      # paho-mqtt >= 2.0
+
+def _matte_from_ha(payload: str) -> str:
+    return "none" if payload in (NO_MATTE, "none") else payload
+
+
+def _new_client(mqtt):
+    """A paho client that works on both 1.x and 2.x (2.0 requires an explicit
+    callback API version; VERSION1 keeps the signatures below valid on both)."""
+    if hasattr(mqtt, "CallbackAPIVersion"):
         return mqtt.Client(mqtt.CallbackAPIVersion.VERSION1)
     return mqtt.Client()
 
 
-def _device() -> dict:
-    return {"identifiers": [NODE], "name": "REFRAMED Gallery",
-            "manufacturer": "REFRAMED Gallery (open source)", "model": "reframed.gallery"}
+DEVICE = {"identifiers": [NODE], "name": "REFRAMED Gallery",
+          "manufacturer": "REFRAMED Gallery (open source)", "model": "reframed.gallery"}
+
+# (component, topic segment, object_id suffix, extra discovery fields)
+ENTITIES = [
+    ("sensor", "current", "current_art", {
+        "name": "Current Art", "state_topic": CUR_STATE,
+        "json_attributes_topic": CUR_ATTR, "icon": "mdi:image-frame"}),
+    ("button", "next", "next", {
+        "name": "Next", "command_topic": NEXT_CMD, "icon": "mdi:skip-next"}),
+    ("select", "collection", "collection", {
+        "name": "Collection", "command_topic": SEL_CMD, "state_topic": SEL_STATE,
+        "options": SELECT_OPTIONS, "icon": "mdi:palette"}),
+    ("select", "matte", "matte", {
+        "name": "Matte", "command_topic": MATTE_CMD, "state_topic": MATTE_STATE,
+        "options": MATTE_OPTIONS, "icon": "mdi:image-frame"}),
+    ("text", "link", "show_link", {
+        "name": "Show link", "command_topic": LINK_CMD, "state_topic": LINK_STATE,
+        "max": 255, "mode": "text", "icon": "mdi:link-variant"}),
+    ("button", "hide", "hide", {
+        "name": "Hide current art", "command_topic": HIDE_CMD, "icon": "mdi:eye-off"}),
+]
+
+
+def discovery_messages() -> list[tuple[str, dict]]:
+    """(config topic, payload) for every entity."""
+    out = []
+    for component, segment, suffix, fields in ENTITIES:
+        object_id = f"{NODE}_{suffix}"
+        out.append((f"homeassistant/{component}/{NODE}/{segment}/config", {
+            **fields, "object_id": object_id, "unique_id": object_id,
+            "availability_topic": AVAIL, "device": DEVICE}))
+    return out
 
 
 class MqttCtl:
-    def __init__(self, opts, on_next, on_collection, on_matte=None, on_url=None,
-                 on_hide=None) -> None:
+    def __init__(self, opts, app) -> None:
         self.opts = opts
-        self.on_next = on_next                 # callable() -> show next now
-        self.on_collection = on_collection     # callable(slug) -> switch collection
-        self.on_matte = on_matte               # callable(matte_id) -> switch TV matte
-        self.on_url = on_url                   # callable(url) -> (accepted, message)
-        self.on_hide = on_hide                 # callable() -> (hidden, message)
+        self.app = app                     # controller.Gallery
         self.client = None
-        self.current_collection = (getattr(opts, "collection", "") or "seasonal")
-        self.current_matte = (getattr(opts, "tv_matte", "") or "none")
 
-    def _resolve(self):
+    def _broker(self):
+        """(host, port, user, password) - the manual settings, else the
+        Supervisor's Mosquitto service, else (None, ...)."""
         o = self.opts
-        if getattr(o, "mqtt_host", ""):
+        if o.mqtt_host:
             return o.mqtt_host, o.mqtt_port, o.mqtt_username or None, o.mqtt_password or None
         token = os.environ.get("SUPERVISOR_TOKEN")
         if not token:
@@ -99,121 +128,85 @@ class MqttCtl:
             return None, 0, None, None
 
     def start(self) -> None:
-        if not getattr(self.opts, "enable_mqtt", True):
+        if not self.opts.enable_mqtt:
             return
-        host, port, user, pw = self._resolve()
+        host, port, user, pw = self._broker()
         if not host:
             log.warning("MQTT unavailable - HA entities disabled (install the Mosquitto "
                         "broker app, or set mqtt_host)")
             return
         import paho.mqtt.client as mqtt
 
-        self.client = _new_client(mqtt)
+        client = _new_client(mqtt)
         if user:
-            self.client.username_pw_set(user, pw)
-        self.client.will_set(AVAIL, "offline", retain=True)
-        self.client.on_connect = self._on_connect
-        self.client.on_message = self._on_message
+            client.username_pw_set(user, pw)
+        client.will_set(AVAIL, "offline", retain=True)
+        client.on_connect = self._on_connect
+        client.on_message = self._on_message
         try:
-            self.client.connect_async(host, port, 60)
-            self.client.loop_start()
+            client.connect_async(host, port, 60)
+            client.loop_start()
+            self.client = client
             log.info("MQTT connecting to %s:%d", host, port)
         except OSError as exc:
             log.warning("MQTT connect failed: %s", exc)
-            self.client = None
 
     def _on_connect(self, client, _userdata, _flags, rc) -> None:
         if rc != 0:
             log.warning("MQTT connection refused (rc=%s)", rc)
             return
-        client.publish(f"homeassistant/sensor/{NODE}/current/config", json.dumps({
-            "name": "Current Art", "object_id": f"{NODE}_current_art",
-            "unique_id": f"{NODE}_current_art", "state_topic": CUR_STATE,
-            "json_attributes_topic": CUR_ATTR, "availability_topic": AVAIL,
-            "icon": "mdi:image-frame", "device": _device()}), retain=True)
-        client.publish(f"homeassistant/button/{NODE}/next/config", json.dumps({
-            "name": "Next", "object_id": f"{NODE}_next", "unique_id": f"{NODE}_next",
-            "command_topic": NEXT_CMD, "availability_topic": AVAIL,
-            "icon": "mdi:skip-next", "device": _device()}), retain=True)
-        client.publish(f"homeassistant/select/{NODE}/collection/config", json.dumps({
-            "name": "Collection", "object_id": f"{NODE}_collection",
-            "unique_id": f"{NODE}_collection", "command_topic": SEL_CMD,
-            "state_topic": SEL_STATE, "options": SELECT_OPTIONS,
-            "availability_topic": AVAIL, "icon": "mdi:palette", "device": _device()}), retain=True)
-        client.publish(f"homeassistant/select/{NODE}/matte/config", json.dumps({
-            "name": "Matte", "object_id": f"{NODE}_matte",
-            "unique_id": f"{NODE}_matte", "command_topic": MATTE_CMD,
-            "state_topic": MATTE_STATE, "options": MATTE_OPTIONS,
-            "availability_topic": AVAIL, "icon": "mdi:image-frame",
-            "device": _device()}), retain=True)
-        # A text entity, so an automation (or a dashboard field) can set one
-        # reframed.gallery artwork URL and have that exact piece go up.
-        client.publish(f"homeassistant/text/{NODE}/link/config", json.dumps({
-            "name": "Show link", "object_id": f"{NODE}_show_link",
-            "unique_id": f"{NODE}_show_link", "command_topic": LINK_CMD,
-            "state_topic": LINK_STATE, "max": 255, "mode": "text",
-            "availability_topic": AVAIL, "icon": "mdi:link-variant",
-            "device": _device()}), retain=True)
-        # Hide-and-replace as a button, so a dashboard tile (or an automation)
-        # can retire a piece without opening the panel.
-        client.publish(f"homeassistant/button/{NODE}/hide/config", json.dumps({
-            "name": "Hide current art", "object_id": f"{NODE}_hide",
-            "unique_id": f"{NODE}_hide", "command_topic": HIDE_CMD,
-            "availability_topic": AVAIL, "icon": "mdi:eye-off",
-            "device": _device()}), retain=True)
+        for topic, payload in discovery_messages():
+            client.publish(topic, json.dumps(payload), retain=True)
         client.publish(AVAIL, "online", retain=True)
-        client.publish(SEL_STATE, self.current_collection, retain=True)
-        client.publish(MATTE_STATE, self.current_matte, retain=True)
-        client.subscribe([(NEXT_CMD, 0), (SEL_CMD, 0), (MATTE_CMD, 0), (LINK_CMD, 0),
-                          (HIDE_CMD, 0)])
+        status = self.app.status
+        client.publish(SEL_STATE, status.get("collection") or "seasonal", retain=True)
+        client.publish(MATTE_STATE, _matte_to_ha(status.get("matte")), retain=True)
+        client.subscribe([(t, 0) for t in (NEXT_CMD, SEL_CMD, MATTE_CMD, LINK_CMD,
+                                           HIDE_CMD)])
         log.info("MQTT connected; REFRAMED Gallery entities announced")
+
+    def _publish(self, topic: str, payload: str) -> None:
+        if self.client:
+            self.client.publish(topic, payload, retain=True)
 
     def _on_message(self, _client, _userdata, msg) -> None:
         try:
             payload = msg.payload.decode().strip()
         except (UnicodeDecodeError, AttributeError):
             return
-        if msg.topic == NEXT_CMD:
+        topic = msg.topic
+        if topic == NEXT_CMD:
             log.info("HA pressed Next")
-            self.on_next()
-        elif msg.topic == HIDE_CMD:
-            _, message = self.on_hide() if self.on_hide else (False, "unavailable")
-            log.info("HA pressed Hide: %s", message)
-        elif msg.topic == SEL_CMD and payload:
+            self.app.show_next()
+        elif topic == HIDE_CMD:
+            log.info("HA pressed Hide: %s", self.app.hide_current()[1])
+        elif topic == SEL_CMD and payload:
             log.info("HA set collection -> %s", payload)
-            self.current_collection = payload
-            if self.client:
-                self.client.publish(SEL_STATE, payload, retain=True)
-            self.on_collection(payload)
-        elif msg.topic == MATTE_CMD and payload:
-            log.info("HA set matte -> %s", payload)
-            self.current_matte = payload
-            if self.client:
-                self.client.publish(MATTE_STATE, payload, retain=True)
-            if self.on_matte:
-                self.on_matte(payload)
-        elif msg.topic == LINK_CMD and payload:
-            accepted, message = self.on_url(payload) if self.on_url else (False, "unavailable")
+            self._publish(SEL_STATE, payload)
+            self.app.set_collection(payload)
+        elif topic == MATTE_CMD and payload:
+            matte = _matte_from_ha(payload)
+            log.info("HA set matte -> %s", matte)
+            self._publish(MATTE_STATE, _matte_to_ha(matte))
+            self.app.set_matte(matte)
+        elif topic == LINK_CMD and payload:
+            accepted, message = self.app.queue_link(payload)
             log.info("HA set link -> %s (%s: %s)", payload,
                      "accepted" if accepted else "rejected", message)
-            # Echo the link back only once it's queued, so the entity never shows
-            # a URL the app refused.
-            if accepted and self.client:
-                self.client.publish(LINK_STATE, payload[:255], retain=True)
+            # Echo only accepted links, so the entity never shows a refused URL.
+            if accepted:
+                self._publish(LINK_STATE, payload[:255])
 
-    def publish_current(self, art) -> None:
+    def publish_current(self, art, status: dict) -> None:
         if not self.client:
             return
-        self.client.publish(CUR_STATE, (art.title or "Unknown")[:255], retain=True)
-        self.client.publish(CUR_ATTR, json.dumps({
-            "artist": art.artist,
-            "year": getattr(art, "year", ""),
-            "medium": getattr(art, "medium", ""),
-            "movement": getattr(art, "movement", ""),
-            "description": getattr(art, "description", ""),
-            "collection": self.current_collection,
-            "matte": self.current_matte,
-            "credit": art.credit, "source": art.source}), retain=True)
+        self._publish(CUR_STATE, (art.title or "Unknown")[:255])
+        self._publish(CUR_ATTR, json.dumps({
+            "artist": art.artist, "year": art.year, "medium": art.medium,
+            "movement": art.movement, "description": art.description,
+            "collection": status.get("collection", ""),
+            "matte": status.get("matte", "none"),
+            "credit": art.credit, "source": art.source}))
 
     def stop(self) -> None:
         if not self.client:

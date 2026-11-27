@@ -1,5 +1,13 @@
 # Changelog
 
+## REFRAMED Gallery 0.8.0 — 2026-11-27
+
+**Keep every piece on the TV**: `library_size` `0` keeps all past art on the
+Frame (1 = replace yesterday's, N = keep the last N). A failed change is retried
+in 15 minutes instead of a day, and the HA Matte select shows `off` instead of
+*unknown*. The app's code was restructured and its tests doubled; entities,
+options and saved state carry over unchanged.
+
 ## REFRAMED Gallery 0.7.2 — 2026-11-27
 
 **Art changes again**: a damaged image on reframed.gallery stopped every change

@@ -45,7 +45,8 @@ class _Resp:
 def src(monkeypatch):
     s = reframed_mod.ReframedSource()
     pages = {"https://www.reframed.gallery/george-inness/autumn-meadows": PAGE}
-    monkeypatch.setattr(s, "_get", lambda url: _Resp(pages[url]) if url in pages else None)
+    monkeypatch.setattr(reframed_mod.net, "get",
+                        lambda url, **kw: _Resp(pages[url]) if url in pages else None)
     return s
 
 
@@ -73,12 +74,13 @@ def test_collection_memberships_feed_the_keyword_filter(src):
 def test_without_a_cloudflare_id_the_file_name_is_the_id(monkeypatch):
     s = reframed_mod.ReframedSource()
     page = PAGE.replace("d99212ba-b039-432d-7d7d-9f7ba31e7900", "")
-    monkeypatch.setattr(s, "_get", lambda url: _Resp(page))
+    monkeypatch.setattr(reframed_mod.net, "get", lambda url, **kw: _Resp(page))
     art = s.artwork_from_url("/george-inness/autumn-meadows")
     assert art.id == "George Inness - Autumn Meadows - reframed.jpg"
 
 
 def test_a_page_without_artwork_data_resolves_to_nothing(monkeypatch):
     s = reframed_mod.ReframedSource()
-    monkeypatch.setattr(s, "_get", lambda url: _Resp("<html>Just a moment...</html>"))
+    monkeypatch.setattr(reframed_mod.net, "get",
+                        lambda url, **kw: _Resp("<html>Just a moment...</html>"))
     assert s.artwork_from_url("/george-inness/autumn-meadows") is None

@@ -2,12 +2,13 @@
 #
 # A long-running service that pulls curated public-domain art from reframed.gallery
 # (or the Art Institute of Chicago), fits it to your Frame TV's panel, and pushes
-# it to Art Mode - keeping a bounded art library (1 = replace in place, or keep the
-# last N days to browse back through) and never repeating recent pieces. Switches
+# it to Art Mode - keeping a bounded art library (1 = replace in place, N = keep the
+# last N days to browse back through, 0 = keep them all) and never repeating
+# recent pieces. Switches
 # daily (or on your own interval); no automation needed. Paste a reframed.gallery
 # link into the panel to show one specific piece now.
 name: REFRAMED Gallery
-version: "0.7.2"
+version: "0.8.0"
 slug: frame_gallery
 description: >-
   Curated public-domain art on your Samsung Frame TV from reframed.gallery -
@@ -43,8 +44,8 @@ map:
 # weather entity's condition. Only used when weather_entity is set.
 homeassistant_api: true
 
-# MQTT (auto-detected from the Mosquitto app) powers the HA entities:
-# a Current Art sensor, a Next button, a Collection select, and a Matte select.
+# MQTT (auto-detected from the Mosquitto app) powers the HA entities: a Current
+# Art sensor, Next and Hide buttons, Collection and Matte selects, a Show link text.
 services:
   - mqtt:want
 
@@ -121,12 +122,13 @@ schema:
   active_hours: "str?"
   # How many of our uploads stay in the TV's art library. 1 = replace in place
   # (the classic behaviour); higher keeps the last N days of art on the TV so you
-  # can flick back through them with the remote. Only our own uploads are deleted.
-  library_size: "int(1,50)"
+  # can flick back through them with the remote; 0 = keep every piece, never
+  # delete. Only our own uploads are ever deleted.
+  library_size: "int(0,1000)"
   # Don't repeat the last N pieces (0 = allow repeats).
   avoid_repeat_count: "int(0,5000)"
-  # Expose HA entities (Current Art sensor, Next button, Collection select) over MQTT
-  # discovery. Leave the MQTT fields blank to auto-detect the Mosquitto app.
+  # Expose HA entities (Current Art sensor, Next/Hide buttons, Collection/Matte
+  # selects, Show link text) over MQTT discovery. Leave the MQTT fields blank to auto-detect the Mosquitto app.
   enable_mqtt: "bool"
   mqtt_host: "str?"
   mqtt_port: "port"

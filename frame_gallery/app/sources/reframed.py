@@ -30,7 +30,8 @@ import time
 from datetime import datetime
 from urllib.parse import unquote, urlparse
 
-import requests
+import net
+import weather
 
 from sources.base import ArtSource, Artwork
 
@@ -47,9 +48,6 @@ RESOLVE_DELAY = 2.0               # seconds between fetches (under Cloudflare's 
 NONART = frozenset({"collections", "verticals", "colors", "cartographers",
                     "wheres-wally", "page", "artists", "recent", "chrome-extension",
                     "faq", "contact", "about", "_next"})
-HEADERS = {
-    "User-Agent": "ha-addons/0.1 (+https://github.com/adamoberley/ha-addons) frame-gallery",
-}
 
 _LDJSON_RE = re.compile(
     r'<script[^>]+type="application/ld\+json"[^>]*>(.*?)</script>', re.S | re.I)
@@ -60,6 +58,7 @@ _LINK_RE = re.compile(r'href="(/[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*)"')
 _COLL_RE = re.compile(r"/collections/([a-z0-9-]+)")
 _SLUG_RE = re.compile(r"[a-z0-9][a-z0-9-]*", re.I)
 _HOSTS = ("www.reframed.gallery", "reframed.gallery")
+
 
 def _deslug(seg: str) -> str:
     return seg.replace("-", " ").strip().title() or "Unknown"
@@ -144,15 +143,19 @@ class ReframedSource(ArtSource):
 
     def __init__(self) -> None:
         self.override: str | None = None        # live collection switch (HA select)
-        self.weather_condition: str | None = None  # set by main when weather mode is on
+        self.weather_condition: str | None = None  # last good read of weather_entity
         self._pools: dict[str, list[str]] = {}   # pool key -> artwork page URLs
         self._pool_ts: dict[str, float] = {}
         self._resolved: dict[str, Artwork] = {}  # page URL -> Artwork
+        self.last_pool = ""                      # collection the last batch came from
+
+    def choice(self, opts) -> str:
+        """What the user picked: the live HA override, else the option."""
+        return (self.override or opts.collection or "").strip().lower()
 
     def active_collection(self, opts) -> str:
-        """Effective collection slug: override beats option; '' / 'all' = whole catalogue."""
-        choice = (self.override or getattr(opts, "collection", "") or "").strip().lower()
-        hemi = getattr(opts, "hemisphere", "north")
+        """Effective collection slug for the choice; '' = the whole catalogue."""
+        choice, hemi = self.choice(opts), opts.hemisphere
         if choice in ("", "all"):
             return ""
         if choice == "seasonal":
@@ -161,21 +164,18 @@ class ReframedSource(ArtSource):
             return _weather_slug(self.weather_condition, datetime.now(), hemi)
         return choice
 
-    def _get(self, url: str) -> requests.Response | None:
-        for attempt in range(3):
-            try:
-                r = requests.get(url, headers=HEADERS, timeout=20)
-                if r.status_code in (403, 429) and attempt < 2:
-                    time.sleep(2 * (attempt + 1))
-                    continue
-                r.raise_for_status()
-                return r
-            except requests.RequestException as exc:
-                if attempt < 2:
-                    time.sleep(2)
-                    continue
-                log.warning("reframed request failed (%s): %s", url, exc)
-        return None
+    def _refresh_weather(self, opts) -> None:
+        """In "weather" mode, read the HA weather entity before choosing. A
+        failed read keeps the last good condition."""
+        if self.choice(opts) != "weather":
+            return
+        if not opts.weather_entity:
+            log.warning("collection 'weather' selected but no weather_entity set - "
+                        "using seasonal art")
+            return
+        cond = weather.current_condition(opts.weather_entity)
+        if cond:
+            self.weather_condition = cond
 
     def _artwork_paths(self, html: str) -> list[str]:
         """Unique /artist/title links on a collection page, in document order, minus nav."""
@@ -191,7 +191,7 @@ class ReframedSource(ArtSource):
         if self._pools.get(key) and (time.time() - self._pool_ts.get(key, 0)) < POOL_TTL:
             return self._pools[key]
         if key == "__all__":
-            r = self._get(SITEMAP)
+            r = net.get(SITEMAP)
             urls = []
             if r is not None:
                 for loc in _LOC_RE.findall(r.text):
@@ -199,7 +199,7 @@ class ReframedSource(ArtSource):
                     if p.count("/") == 1 and p.split("/", 1)[0] not in NONART:
                         urls.append(loc)
         else:
-            r = self._get(COLLECTION.format(key))
+            r = net.get(COLLECTION.format(key))
             urls = self._artwork_paths(r.text) if r is not None else []
         if urls:
             self._pools[key] = urls
@@ -236,7 +236,7 @@ class ReframedSource(ArtSource):
     def _resolve(self, page_url: str) -> Artwork | None:
         if page_url in self._resolved:
             return self._resolved[page_url]
-        r = self._get(page_url)
+        r = net.get(page_url)
         if r is None:
             return None
         ld = self._ld_artwork(r.text)
@@ -276,11 +276,13 @@ class ReframedSource(ArtSource):
         return self._resolve(page_url)
 
     def candidates(self, opts, count: int = 100) -> list[Artwork]:
+        self._refresh_weather(opts)
         key = self.active_collection(opts) or "__all__"
         pool = self._load_pool(key)
         if not pool and key != "__all__":
             log.warning("collection '%s' empty - falling back to the whole catalogue", key)
-            pool = self._load_pool("__all__")
+            key, pool = "__all__", self._load_pool("__all__")
+        self.last_pool = "all" if key == "__all__" else key
         if not pool:
             return []
 

@@ -89,12 +89,13 @@ configuration:
       Leave blank to change art 24/7, or set a local-time window like
       07:00-23:00. Outside it the app idles and leaves the last piece up.
   library_size:
-    name: Art library size (on the TV)
+    name: Pieces to keep on the TV
     description: >-
-      How many pieces to keep in the TV's art library. 1 replaces the art in
-      place (one image, no pile-up). Set it to 7 to keep a week of art on the TV
-      so you can browse back through past days with the remote - the oldest is
-      deleted as a new one arrives. Only images this app uploaded are ever removed.
+      How many past pieces stay in the TV's art library. 1 replaces yesterday's
+      art with today's (no pile-up). 7 keeps a week you can browse back through
+      with the remote, deleting the oldest as each new one arrives. 0 keeps
+      every piece and never deletes (each is about 4 MB of the TV's storage).
+      Only images this app uploaded are ever removed.
   avoid_repeat_count:
     name: No-repeat memory
     description: >-
@@ -103,9 +104,10 @@ configuration:
   enable_mqtt:
     name: Home Assistant entities (MQTT)
     description: >-
-      Expose a Current Art sensor, a Next button, and a Collection select to Home
-      Assistant via MQTT discovery, so you can automate the gallery. Requires the
-      Mosquitto broker app (or your own).
+      Expose a Current Art sensor, Next and Hide buttons, Collection and Matte
+      selects, and a Show link text entity to Home Assistant via MQTT discovery,
+      so you can automate the gallery. Requires the Mosquitto broker app (or your
+      own).
   mqtt_host:
     name: MQTT host
     description: Leave blank to auto-detect the Mosquitto broker app. Set it for an external broker.
