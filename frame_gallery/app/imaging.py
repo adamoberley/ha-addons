@@ -22,6 +22,21 @@ def _rgb(hex_color: str) -> tuple:
         return 20, 20, 20
 
 
+def decodes(image_bytes: bytes) -> bool:
+    """True if the bytes are a whole, decodable image.
+
+    A source can serve a damaged file with a 200 - reframed.gallery's CDN has
+    at least one original cut off before its JPEG end marker - and Pillow only
+    notices when it decodes every row, so check before committing to a piece
+    rather than failing the whole change at render time."""
+    try:
+        with Image.open(BytesIO(image_bytes)) as img:
+            img.load()
+        return True
+    except Exception:          # any decode failure means "not usable"
+        return False
+
+
 def fit_to_panel(image_bytes: bytes, width: int, height: int,
                  mode: str = "matte", mat_color: str = "#141414",
                  quality: int = 90) -> bytes:

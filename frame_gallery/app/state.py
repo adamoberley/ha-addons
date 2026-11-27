@@ -54,6 +54,12 @@ class History:
     def seen(self, key: str) -> bool:
         return self.cap > 0 and key in self.recent
 
+    def oldest_first(self, arts: list) -> list:
+        """`arts` ordered by when each was last shown, longest ago first
+        (anything never shown, or long forgotten, leads)."""
+        rank = {k: i for i, k in enumerate(self.recent)}
+        return sorted(arts, key=lambda a: rank.get(a.key, -1))
+
     def add(self, key: str) -> None:
         if self.cap <= 0:
             return
