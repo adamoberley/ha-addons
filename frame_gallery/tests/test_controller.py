@@ -204,6 +204,60 @@ def test_an_unreachable_tv_is_a_note_not_a_crash(tmp_path):
     status = app.status.snapshot()
     assert status["key"] and status["tv_ok"] == 0
     assert status["note"] == "reached 0/1 TV(s)"
+    assert status["last_error"] == "a: TV unreachable"
+
+
+def test_a_change_no_tv_took_is_retried_and_not_counted_as_seen(tmp_path):
+    tv = FakeTV("a", fails=True)
+    app = make(tmp_path, tvs=[tv], daily_time="")
+    shown = []
+    app.listeners.append(lambda a, status: shown.append(a.key))
+    (wait,) = one_pass(app)
+    assert wait <= controller_mod.RETRY_SECONDS and app.retry_pending
+    tried = app.status.get("key")
+    assert not app.history.seen(tried)       # nobody saw it, so it can come round again
+    assert shown == []                       # HA keeps showing what is really on the TV
+
+    tv.fails = False                         # the TV is back by the retry
+    one_pass(app)
+    assert not app.retry_pending and len(tv.pushes) == 1
+    assert app.history.seen(app.status.get("key")) and len(shown) == 1
+
+
+def test_a_repush_that_lands_the_untaken_piece_publishes_it(tmp_path):
+    tv = FakeTV("a", fails=True)
+    app = make(tmp_path, tvs=[tv], daily_time="")
+    shown = []
+    app.listeners.append(lambda a, status: shown.append(a.key))
+    one_pass(app)                                # scheduled change: no TV took it
+    piece = app.status.get("key")
+    assert app.retry_pending and shown == []
+
+    tv.fails = False
+    app.repush()
+    one_pass(app)
+    assert shown == [piece] and app.history.seen(piece)
+    assert not app.retry_pending                 # it's up; nothing to retry
+
+
+def test_a_shown_link_cancels_a_pending_retry(tmp_path, monkeypatch):
+    tv = FakeTV("a", fails=True)
+    app = make(tmp_path, tvs=[tv], daily_time="")
+    one_pass(app)
+    assert app.retry_pending
+    tv.fails = False
+    monkeypatch.setattr(app, "_show_link", lambda url: True)
+    app.intents.request(controller_mod.LINK, "https://reframed.gallery/x/y")
+    one_pass(app)
+    assert not app.retry_pending
+
+
+def test_a_partial_push_still_counts_as_shown(tmp_path):
+    app = make(tmp_path, tvs=[FakeTV("a"), FakeTV("b", fails=True)], daily_time="")
+    one_pass(app)
+    assert not app.retry_pending
+    assert app.history.seen(app.status.get("key"))
+    assert app.status.get("last_error") is None
 
 
 def test_an_exception_lands_in_the_status_and_the_loop_survives(tmp_path, monkeypatch):

@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.8.1 — 2026-11-28
+
+- **A TV that stops answering can no longer freeze the app.** A Frame pings
+  every connection every few seconds, and the TV library counted each ping as
+  progress, so when the TV's Art app never answered, a change could wait for
+  hours. Meanwhile nothing else ran: no daily change, no Next, no Hide. From
+  about 17 November that is what happened here: changes hung until the TV's
+  screen happened to wake or sleep, then failed with
+  `push failed: {'data': '{"event": "go_to_standby"}', ...}`. Every wait on
+  the TV now has a real deadline (10 s to connect, 60 s for any answer).
+- **The cause on that TV was Vetro's "MultiScreen" quick win**, which stops
+  Samsung's MultiScreen service at boot; without it the Frame's Art app ignores
+  everything on the network. If the log says *the TV's Art app didn't get
+  ready*, turn that win off and restart the TV (see Troubleshooting).
+- **Power news from the TV no longer breaks the connection.** A `go_to_standby`
+  or similar broadcast arriving while connecting is read past; errors are now
+  plain sentences instead of the TV's raw message.
+- **A change no TV took is retried in 15 minutes**, and the piece isn't added
+  to the no-repeat history (nobody saw it). Home Assistant's *Current Art*
+  keeps showing what is really on the TV, and the panel shows the TV's reason.
+- **A refused pairing says where to fix it** (the TV's Device List) instead of
+  failing with a raw message.
+- **No push can run longer than 5 minutes**: a watchdog ends it, whatever the
+  TV is doing, so the loop always moves on.
+- **The art is only put on screen when the TV says it is in Art Mode.** If it
+  can't tell, the piece is selected without being shown, so nobody watching
+  TV gets interrupted.
+- A piece that only reached the TV on a later **Re-push** or matte change is
+  then published to Home Assistant and the no-repeat history, and a shown link
+  is no longer replaced by a pending retry.
+- The TV library's own logging is held at warnings, so the pairing token never
+  reaches the app log, even at `debug`.
+
 ## 0.8.0 — 2026-11-27
 
 - **Keep every piece on the TV, if you like.** *Pieces to keep on the TV*

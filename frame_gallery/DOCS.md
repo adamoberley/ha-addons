@@ -212,6 +212,16 @@ extremely unlikely. Tighten `query` if you want a guaranteed-tame collection.
 - **First upload fails / `ms.channel.timeOut` / `send_image error -2`** — accept
   the **Allow** and **Art Store terms** prompts on the TV (it blocks uploads
   until you do), then restart.
+- **"the TV's Art app didn't get ready"** — the TV took the connection but its
+  Art app never answered. On a Frame running **Vetro**, turn off its
+  **MultiScreen** quick win (Vetro → Quick settings) and restart the TV: that
+  win stops Samsung's MultiScreen service at boot, and without it the Art app
+  ignores everything on the network. The app tries again every 15 minutes.
+- **"the TV's Art app said it is going to standby"** — the TV turned off or its
+  screen went to sleep while connecting; the app tries again in 15 minutes.
+- **"the TV refused FrameGallery"** — allow it again under *Settings → General →
+  External Device Manager → Device Connection Manager → Device List*, or accept
+  the *Allow* prompt the next try brings up.
 - **Image is set but the TV doesn't switch to it** — it uses Art-Mode-aware
   pushing; switch the TV to Art Mode to see it.
 - **"no artwork found"** — your `query` is too narrow, or everything matched a
