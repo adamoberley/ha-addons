@@ -30,6 +30,7 @@ REFUSED = {"event": "ms.channel.unauthorized"}
 
 
 PING = "ping"
+CLOSE = "close"
 
 
 class FakeSocket:
@@ -39,6 +40,8 @@ class FakeSocket:
     def __init__(self, frames):
         self.frames = list(frames)
         self.closed = False
+        self.shut = False
+        self.sent: list = []
         self.timeouts: list[float] = []
 
     def recv_data_frame(self, control_frame=False):
@@ -48,7 +51,15 @@ class FakeSocket:
         f = self.frames.pop(0)
         if f is PING:
             return websocket.ABNF.OPCODE_PING, websocket.ABNF(opcode=9, data=b"\x00")
+        if f is CLOSE:
+            return websocket.ABNF.OPCODE_CLOSE, websocket.ABNF(opcode=8, data=b"")
         return websocket.ABNF.OPCODE_TEXT, websocket.ABNF(data=json.dumps(f).encode())
+
+    def send(self, payload, opcode=None):
+        self.sent.append(payload)
+
+    def shutdown(self):
+        self.shut = True
 
     def settimeout(self, value):
         self.timeouts.append(value)
@@ -128,6 +139,34 @@ def test_a_request_the_tv_never_answers_ends(tmp_path, tv_sends, monkeypatch):
         art._recv_frame()
 
 
+def test_broadcasts_skipped_while_waiting_share_one_deadline(tmp_path, tv_sends, monkeypatch):
+    """samsungtvws skips unrelated broadcasts and reads again; those reads must
+    not each get a fresh budget, or a chatty TV holds a request open forever."""
+    sock = tv_sends(CONNECT, READY)
+    art = channel(tmp_path)
+    art.open()
+    now = [0.0]
+    monkeypatch.setattr(artlink.time, "monotonic", lambda: now[0])
+    art.send_command({"method": "ms.channel.emit"})      # the clock starts here
+    sock.frames = [STANDBY] * 1000
+
+    def tick(control_frame=False, _real=sock.recv_data_frame):
+        now[0] += 7                                        # a broadcast every 7 s
+        return _real(control_frame)
+    sock.recv_data_frame = tick
+    with pytest.raises(ConnectionFailure, match="stopped answering"):
+        while True:
+            art._recv_frame()                              # what samsungtvws loops on
+    assert now[0] <= artlink.REQUEST_TIMEOUT + 7
+
+
+def test_a_close_from_the_tv_shuts_the_socket(tmp_path, tv_sends):
+    sock = tv_sends(CONNECT, CLOSE)
+    with pytest.raises(ConnectionFailure, match="closed the Art channel"):
+        channel(tmp_path).open()
+    assert sock.shut
+
+
 def test_answers_still_come_through_after_open(tmp_path, tv_sends):
     sock = tv_sends(CONNECT, READY)
     art = channel(tmp_path)
@@ -184,8 +223,69 @@ def test_an_interrupted_handshake_is_retried(frame, tv_sends):
     assert art.connection is sock
 
 
-def test_a_refused_token_is_dropped_so_the_next_try_pairs_afresh(frame, tv_sends):
+def test_a_refusal_keeps_the_token_and_says_where_to_allow(frame, tv_sends):
     tv_sends(REFUSED)
     with pytest.raises(UnauthorizedError, match="Device Connection Manager"):
         frame._connect()
-    assert not Path(frame.token_file).exists()
+    # Dropping it would put an Allow prompt on the TV at every retry.
+    assert Path(frame.token_file).read_text() == "old-token"
+
+
+# --- the push watchdog and Art Mode --------------------------------------------
+
+class StuckArt:
+    """An Art channel whose upload blocks until abort() is called."""
+
+    def __init__(self, *a, **kw):
+        import threading
+        self.news, self.released = [], threading.Event()
+        self.closed = False
+
+    def supported(self):
+        return True
+
+    def open(self):
+        pass
+
+    def upload(self, *a, **kw):
+        self.released.wait(5)
+        raise OSError("socket shut")
+
+    def abort(self):
+        self.released.set()
+
+    def close(self):
+        self.closed = True
+
+
+def test_the_watchdog_ends_a_push_that_never_finishes(frame, monkeypatch):
+    made = []
+    monkeypatch.setattr(tv_mod, "TolerantArt", lambda *a, **kw: made.append(StuckArt()) or made[-1])
+    monkeypatch.setattr(tv_mod, "PUSH_DEADLINE", 0.2)
+    with pytest.raises(TimeoutError, match="longer than"):
+        frame.push(b"jpeg")
+    assert made[0].closed and frame._live is None and not frame._aborted
+
+
+class ArtModeUnknown:
+    def __init__(self):
+        self.selected = []
+
+    def upload(self, *a, **kw):
+        return "MY_F0001"
+
+    def get_artmode(self):
+        raise ConnectionFailure("the TV's Art app stopped answering")
+
+    def select_image(self, cid, show=True):
+        self.selected.append((cid, show))
+
+    def delete(self, cid):
+        return True
+
+
+def test_an_unknown_art_mode_never_forces_the_art_on_screen(frame, tmp_path):
+    frame.state_file = str(tmp_path / "state.json")
+    art = ArtModeUnknown()
+    frame._upload_and_select(art, b"jpeg", "none")
+    assert art.selected == [("MY_F0001", False)]

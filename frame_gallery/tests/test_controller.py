@@ -224,6 +224,34 @@ def test_a_change_no_tv_took_is_retried_and_not_counted_as_seen(tmp_path):
     assert app.history.seen(app.status.get("key")) and len(shown) == 1
 
 
+def test_a_repush_that_lands_the_untaken_piece_publishes_it(tmp_path):
+    tv = FakeTV("a", fails=True)
+    app = make(tmp_path, tvs=[tv], daily_time="")
+    shown = []
+    app.listeners.append(lambda a, status: shown.append(a.key))
+    one_pass(app)                                # scheduled change: no TV took it
+    piece = app.status.get("key")
+    assert app.retry_pending and shown == []
+
+    tv.fails = False
+    app.repush()
+    one_pass(app)
+    assert shown == [piece] and app.history.seen(piece)
+    assert not app.retry_pending                 # it's up; nothing to retry
+
+
+def test_a_shown_link_cancels_a_pending_retry(tmp_path, monkeypatch):
+    tv = FakeTV("a", fails=True)
+    app = make(tmp_path, tvs=[tv], daily_time="")
+    one_pass(app)
+    assert app.retry_pending
+    tv.fails = False
+    monkeypatch.setattr(app, "_show_link", lambda url: True)
+    app.intents.request(controller_mod.LINK, "https://reframed.gallery/x/y")
+    one_pass(app)
+    assert not app.retry_pending
+
+
 def test_a_partial_push_still_counts_as_shown(tmp_path):
     app = make(tmp_path, tvs=[FakeTV("a"), FakeTV("b", fails=True)], daily_time="")
     one_pass(app)

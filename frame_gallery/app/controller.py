@@ -99,6 +99,9 @@ class Gallery:
         self.listeners: list = []           # callables(art, status_snapshot) after a show
         # monotonic time a failed scheduled change is due to be tried again
         self._retry_at: float | None = None
+        # A piece rendered and pushed but taken by no TV: published (history,
+        # HA) only once a re-push or re-matte gets it onto one.
+        self._unpublished = None
         # The source bytes + matte the preview was rendered from, so a matte
         # change re-renders the same piece and a re-push uses the right matte.
         self._rendered_from: bytes | None = None
@@ -190,7 +193,8 @@ class Gallery:
             if self.stop.is_set():           # shutdown raced the take(); don't start work
                 break
             if LINK in wanted:
-                self._show_link(str(wanted[LINK] or ""))
+                if self._show_link(str(wanted[LINK] or "")):
+                    self._retry_at = None        # a pending retry would replace it
             elif NEXT in wanted:
                 if self._cycle():
                     self._retry_at = None
@@ -283,6 +287,7 @@ class Gallery:
         ok = self._render_and_push(self._rendered_from)
         log.info("re-matted current piece (%s) -> %d/%d TV(s)",
                  self._rendered_matte, ok, len(self.tvs))
+        self._landed(ok)
         return True
 
     def _repush(self) -> bool:
@@ -297,7 +302,17 @@ class Gallery:
             jpeg = fh.read()
         ok = self._push_all(jpeg, self._rendered_matte)
         log.info("re-pushed current image -> %d/%d TV(s)", ok, len(self.tvs))
+        self._landed(ok)
         return True
+
+    def _landed(self, ok: int) -> None:
+        """A re-push or re-matte reached a TV. If it carried a piece no TV had
+        taken yet, that piece is now really showing: publish it, and drop the
+        retry that was going to replace it."""
+        if ok and self._unpublished is not None:
+            art, self._unpublished = self._unpublished, None
+            self._publish(art)
+            self._retry_at = None
 
     def _show(self, art, data: bytes, link: str = "", collection: str = "") -> bool:
         """Render + push one resolved artwork and publish it everywhere. False
@@ -312,7 +327,14 @@ class Gallery:
         log.info("showing '%s' by %s (%s) -> %d/%d TV(s)",
                  art.title, art.artist, art.credit, ok, len(self.tvs))
         if self.tvs and not ok:
+            self._unpublished = art
             return False
+        self._unpublished = None
+        self._publish(art)
+        return True
+
+    def _publish(self, art) -> None:
+        """A piece is on a TV: record it as seen and tell the listeners (HA)."""
         self.history.add(art.key)
         snapshot = self.snapshot()
         for listener in self.listeners:
@@ -320,7 +342,6 @@ class Gallery:
                 listener(art, snapshot)
             except Exception:
                 log.exception("publishing the new piece failed")
-        return True
 
     def _render_and_push(self, data: bytes) -> int:
         """Fit the source bytes to the panel using the live matte, save the

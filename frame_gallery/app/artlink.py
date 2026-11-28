@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+import socket
 import ssl
 import time
 
@@ -91,6 +92,9 @@ def recv_by(conn, deadline: float) -> dict | None:
         except websocket.WebSocketTimeoutException:
             return None
         if opcode == websocket.ABNF.OPCODE_CLOSE:
+            # websocket-client answered the CLOSE and marked itself closed, so a
+            # later close() would skip the socket: shut it here.
+            conn.shutdown()
             raise exceptions.ConnectionFailure("the TV closed the Art channel")
         if opcode in _DATA:
             return helper.process_api_response(frame.data)
@@ -104,6 +108,31 @@ class TolerantArt(SamsungTVArt):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.news: list[str] = []
+        self._opening = None          # the socket mid-handshake, for abort()
+        self._reply_by = None         # deadline for answers to the last request
+
+    def abort(self) -> None:
+        """Shut the socket from another thread (the push watchdog), so any read
+        still blocked on it returns at once, mid-frame or not."""
+        for conn in (self.connection, self._opening):
+            sock = getattr(conn, "sock", None)
+            if sock is not None:
+                try:
+                    sock.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+
+    def send_command(self, *args, **kwargs):
+        """Every request restarts the answer clock; answers to it, and anything
+        the TV says in between, must all arrive within REQUEST_TIMEOUT."""
+        self._reply_by = time.monotonic() + REQUEST_TIMEOUT
+        return super().send_command(*args, **kwargs)
+
+    def _upload_ws_binary_send_image(self, *args, **kwargs):
+        """Art API 0.97 sends the image as one binary frame, not a command;
+        its answer gets the same clock."""
+        self._reply_by = time.monotonic() + REQUEST_TIMEOUT
+        return super()._upload_ws_binary_send_image(*args, **kwargs)
 
     def open(self) -> websocket.WebSocket:
         if self.connection:
@@ -113,6 +142,7 @@ class TolerantArt(SamsungTVArt):
         conn = websocket.create_connection(
             self._format_websocket_url(self.endpoint), limit, sslopt=sslopt,
             connection="Connection: Upgrade")
+        self._opening = conn
         self.news = []
         connected = False
         deadline = time.monotonic() + limit
@@ -139,12 +169,17 @@ class TolerantArt(SamsungTVArt):
         except BaseException:
             conn.close()
             raise
+        finally:
+            self._opening = None
 
     def _recv_frame(self):
-        """samsungtvws's own reader, but a TV that stops answering fails the
-        request after REQUEST_TIMEOUT instead of holding it open on pings."""
+        """samsungtvws's own reader, but bounded: everything read for one
+        request (its answers, and broadcasts the library skips while waiting)
+        must arrive within REQUEST_TIMEOUT of sending it, pings or not."""
         assert self.connection
-        frame = recv_by(self.connection, time.monotonic() + REQUEST_TIMEOUT)
+        if self._reply_by is None:
+            self._reply_by = time.monotonic() + REQUEST_TIMEOUT
+        frame = recv_by(self.connection, self._reply_by)
         if frame is None:
             raise exceptions.ConnectionFailure(
                 f"the TV's Art app stopped answering (nothing in {REQUEST_TIMEOUT:.0f}s)")

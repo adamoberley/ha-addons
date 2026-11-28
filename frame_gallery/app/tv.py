@@ -21,6 +21,7 @@ import logging
 import os
 import re
 import socket
+import threading
 import time
 
 # A TV-level rejection (e.g. an unsupported matte -> error -2) is definitive:
@@ -42,6 +43,7 @@ CONNECT_TIMEOUT = 10         # once paired: short connect/liveness timeout per a
 CONNECT_RETRIES = 2          # extra attempts to reach a live TV (3 tries total)
 CONNECT_BACKOFF = 3.0        # seconds between connect attempts
 WAKE_SETTLE = 4.0            # seconds to let the panel come up after a WoL packet
+PUSH_DEADLINE = 300.0        # hard cap on one push, connect retries and pairing included
 
 
 def _safe(host: str) -> str:
@@ -72,6 +74,8 @@ class FrameTV:
         self.token_file = f"/data/tv-token-{_safe(host)}.txt"
         self.state_file = f"/data/tv-state-{_safe(host)}.json"
         self.state = self._load_state()
+        self._live = None             # the Art channel the watchdog may shut
+        self._aborted = False
 
     def _load_state(self) -> dict:
         if os.path.exists(self.state_file):
@@ -105,23 +109,41 @@ class FrameTV:
         TV's matte for this push (so the caller can keep the rendered image and
         the matte in sync); None uses self.matte.
 
-        Two phases on purpose: the REST reachability check is *retried* (a Frame
-        that's asleep fails here, cheaply), while the upload runs exactly *once*
-        on the art websocket - so a lost ack can never duplicate art on the TV.
-        Note: supported() is REST-only, so the art websocket is opened lazily by
-        the first upload and can still fail there (handled by the caller; the
-        rejected upload stored nothing, so there's nothing to duplicate).
+        Two phases on purpose: connecting (REST check + Art channel handshake) is
+        *retried*, while the upload runs exactly *once* on the open channel - so
+        a lost ack can't duplicate art within a push.
+
+        The whole push runs under a watchdog: after PUSH_DEADLINE it shuts the
+        socket, which ends any read still blocked on a TV that trickles or
+        chatters without answering, so no push can hold up the gallery's loop.
         """
         effective_matte = self.matte if matte is None else (matte or "none")
-        art = self._connect()
-        if art is None:
-            return None
+        watchdog = threading.Timer(PUSH_DEADLINE, self._abort)
+        watchdog.daemon = True
+        watchdog.start()
+        art = None
         try:
+            art = self._connect()
+            if art is None:
+                return None
             return self._upload_and_select(art, jpeg, effective_matte)
+        except Exception as exc:
+            if self._aborted:
+                raise TimeoutError(f"the TV took longer than {PUSH_DEADLINE:.0f}s "
+                                   "over one change; gave up") from exc
+            raise
         finally:
+            watchdog.cancel()
+            self._live, self._aborted = None, False
             # The art channel owns the live websocket + FD; close it every cycle.
-            with contextlib.suppress(Exception):
-                art.close()
+            self._close(art)
+
+    def _abort(self) -> None:
+        """Watchdog: shut the live channel's socket so a blocked read returns."""
+        self._aborted = True
+        live = self._live
+        if live is not None:
+            live.abort()
 
     def _connect(self):
         """Open the Art channel of a REST-reachable, Frame-capable TV, retrying
@@ -140,8 +162,10 @@ class FrameTV:
                 log.info("%s: Wake-on-LAN nudge before retry %d", self.host, attempt)
                 _wake_on_lan(self.mac)
                 time.sleep(WAKE_SETTLE)
-            art = TolerantArt(self.host, port=8002, token_file=self.token_file,
-                              name=DEVICE_NAME, timeout=timeout)
+            if self._aborted:
+                raise TimeoutError("the watchdog ended this change")
+            art = self._live = TolerantArt(self.host, port=8002, token_file=self.token_file,
+                                           name=DEVICE_NAME, timeout=timeout)
             try:
                 # supported() is a REST request: the TV is reachable and Frame-capable.
                 if not art.supported():
@@ -154,12 +178,13 @@ class FrameTV:
                              ", ".join(dict.fromkeys(art.news)))
                 return art
             except UnauthorizedError as exc:
+                # The saved token is kept: allowing FrameGallery again in the
+                # TV's Device List makes it valid again, and dropping it would
+                # bring an 'Allow' prompt up on the TV at every retry.
                 self._close(art)
-                self._forget_pairing()
                 raise UnauthorizedError(
                     f"{exc}. Allow it again: TV Settings > General > External Device "
-                    "Manager > Device Connection Manager > Device List, or accept the "
-                    "'Allow FrameGallery' prompt the next try brings up") from None
+                    "Manager > Device Connection Manager > Device List") from None
             except ResponseError:
                 self._close(art)
                 raise               # TV gave a definitive answer; retrying won't help
@@ -171,13 +196,6 @@ class FrameTV:
                             self.host, exc, CONNECT_BACKOFF)
                 time.sleep(CONNECT_BACKOFF)
         raise AssertionError("unreachable: the last attempt returns or raises")
-
-    def _forget_pairing(self) -> None:
-        """The TV refused our token: drop it, so the next try pairs afresh (with
-        the long timeout, and an 'Allow' prompt on the TV) instead of repeating
-        a token the TV has already said no to."""
-        with contextlib.suppress(OSError):
-            os.remove(self.token_file)
 
     @staticmethod
     def _close(*objs) -> None:
@@ -191,14 +209,15 @@ class FrameTV:
         if not new_id:
             raise RuntimeError("upload returned no content id")
 
-        # Don't yank someone off live TV: force-show only when already in
-        # Art Mode; otherwise just set the selection for next time.
-        show = True
+        # Don't yank someone off live TV: force-show only when the TV says it is
+        # in Art Mode; otherwise (including when it doesn't say) just set the
+        # selection, which Art Mode shows next time it comes on.
+        show = False
         try:
-            if str(art.get_artmode()).lower() == "off":
-                show = False
-        except Exception:
-            pass
+            show = str(art.get_artmode()).lower() == "on"
+        except Exception as exc:
+            log.info("%s: couldn't read Art Mode (%s); selecting without showing",
+                     self.host, exc)
         art.select_image(new_id, show=show)
         log.info("%s: uploaded + selected %s (matte=%s, show=%s)",
                  self.host, new_id, matte, show)

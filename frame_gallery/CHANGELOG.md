@@ -20,9 +20,16 @@
 - **A change no TV took is retried in 15 minutes**, and the piece isn't added
   to the no-repeat history (nobody saw it). Home Assistant's *Current Art*
   keeps showing what is really on the TV, and the panel shows the TV's reason.
-- **A refused pairing re-pairs.** If the TV rejects the saved token, it is
-  dropped, so the next try brings up the *Allow* prompt instead of failing the
-  same way forever.
+- **A refused pairing says where to fix it** (the TV's Device List) instead of
+  failing with a raw message.
+- **No push can run longer than 5 minutes**: a watchdog ends it, whatever the
+  TV is doing, so the loop always moves on.
+- **The art is only put on screen when the TV says it is in Art Mode.** If it
+  can't tell, the piece is selected without being shown, so nobody watching
+  TV gets interrupted.
+- A piece that only reached the TV on a later **Re-push** or matte change is
+  then published to Home Assistant and the no-repeat history, and a shown link
+  is no longer replaced by a pending retry.
 - The TV library's own logging is held at warnings, so the pairing token never
   reaches the app log, even at `debug`.
 
