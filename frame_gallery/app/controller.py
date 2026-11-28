@@ -252,8 +252,8 @@ class Gallery:
         if not art:
             return self._fail("no artwork found (try a broader query or collection)")
         # The pool this piece came from, not whatever the collection is by now.
-        self._show(art, data, collection=getattr(self.source, "last_pool", ""))
-        return True
+        # A change no TV took is a failed change: a scheduled one is retried.
+        return self._show(art, data, collection=getattr(self.source, "last_pool", ""))
 
     def _show_link(self, page_url: str) -> bool:
         """Show one specific reframed.gallery piece. You asked for it by name, so
@@ -271,8 +271,7 @@ class Gallery:
         if not data:
             return self._fail(f"couldn't get a usable image of '{art.title}' "
                               "(download failed or the file is damaged)")
-        self._show(art, data, link=page_url)
-        return True
+        return self._show(art, data, link=page_url)
 
     def _remat(self) -> bool:
         """Re-frame the current piece with the live matte (no new pick)."""
@@ -300,22 +299,28 @@ class Gallery:
         log.info("re-pushed current image -> %d/%d TV(s)", ok, len(self.tvs))
         return True
 
-    def _show(self, art, data: bytes, link: str = "", collection: str = "") -> None:
-        """Render + push one resolved artwork and publish it everywhere."""
+    def _show(self, art, data: bytes, link: str = "", collection: str = "") -> bool:
+        """Render + push one resolved artwork and publish it everywhere. False
+        when there are TVs and none took it: the piece then stays out of the
+        no-repeat history (nobody saw it) and Home Assistant keeps showing what
+        is really on the TV."""
         ok = self._render_and_push(data)
-        self.history.add(art.key)
         self.status.update(title=art.title, artist=art.artist, credit=art.credit,
                            year=art.year, medium=art.medium, movement=art.movement,
                            source=art.source, link=link, key=art.key,
                            showing_collection=collection)
         log.info("showing '%s' by %s (%s) -> %d/%d TV(s)",
                  art.title, art.artist, art.credit, ok, len(self.tvs))
+        if self.tvs and not ok:
+            return False
+        self.history.add(art.key)
         snapshot = self.snapshot()
         for listener in self.listeners:
             try:
                 listener(art, snapshot)
             except Exception:
                 log.exception("publishing the new piece failed")
+        return True
 
     def _render_and_push(self, data: bytes) -> int:
         """Fit the source bytes to the panel using the live matte, save the
@@ -339,7 +344,7 @@ class Gallery:
     def _push_all(self, jpeg: bytes, matte: str) -> int:
         """Push to every Frame with one matte snapshot and record how many took
         it. A TV without Art Mode doesn't count as reached."""
-        ok = 0
+        ok, errors = 0, []
         for tv in self.tvs:
             if self.stop.is_set():
                 break
@@ -348,8 +353,11 @@ class Gallery:
                     ok += 1
             except Exception as exc:
                 log.error("%s: push failed: %s", tv.host, exc)
+                errors.append(f"{tv.host}: {exc}")
         total = len(self.tvs)
-        # last_error is for real failures; a partial push is only a note.
-        self.status.update(tv_ok=ok, last_ts=time.time(), last_error=None,
+        # A partial push is only a note; reaching no TV at all is an error, and
+        # the panel shows the TV's reason.
+        self.status.update(tv_ok=ok, last_ts=time.time(),
+                           last_error=errors[0] if total and not ok and errors else None,
                            note=None if ok == total else f"reached {ok}/{total} TV(s)")
         return ok

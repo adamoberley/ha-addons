@@ -23,16 +23,12 @@ import re
 import socket
 import time
 
-from samsungtvws import SamsungTVWS
-
 # A TV-level rejection (e.g. an unsupported matte -> error -2) is definitive:
-# retrying the same call won't help, so we never retry it. Imported defensively
-# because the module path has moved between samsungtvws releases.
-try:
-    from samsungtvws.exceptions import ResponseError
-except Exception:  # pragma: no cover - older/newer layout
-    class ResponseError(Exception):
-        """Fallback if samsungtvws doesn't expose ResponseError."""
+# retrying the same call won't help, so we never retry it. A refused pairing
+# (UnauthorizedError) is definitive too, until someone allows the app again.
+from samsungtvws.exceptions import ResponseError, UnauthorizedError
+
+from artlink import TolerantArt
 
 log = logging.getLogger("frame-gallery.tv")
 
@@ -117,50 +113,58 @@ class FrameTV:
         rejected upload stored nothing, so there's nothing to duplicate).
         """
         effective_matte = self.matte if matte is None else (matte or "none")
-        connection = self._connect()
-        if connection is None:
+        art = self._connect()
+        if art is None:
             return None
-        tv, art = connection
         try:
             return self._upload_and_select(art, jpeg, effective_matte)
         finally:
-            # art is a SEPARATE object from tv and owns the live websocket+FD;
-            # closing only tv would leak it every cycle. Close both.
+            # The art channel owns the live websocket + FD; close it every cycle.
             with contextlib.suppress(Exception):
                 art.close()
-            with contextlib.suppress(Exception):
-                tv.close()
 
     def _connect(self):
-        """Open a connection to a REST-reachable, Frame-capable TV, retrying with
-        backoff (and a Wake-on-LAN nudge when a MAC is set). Returns
-        (client, art_channel), None if the TV has no Art Mode, or raises if it
-        stays unreachable after the retries. The first run uses a long timeout so
-        there's time to tap 'Allow'; once paired, a short timeout keeps a sleeping
-        TV from stalling the scheduler thread."""
+        """Open the Art channel of a REST-reachable, Frame-capable TV, retrying
+        with backoff (and a Wake-on-LAN nudge when a MAC is set). Returns the open
+        channel, None if the TV has no Art Mode, or raises if it stays out of
+        reach after the retries. The first run uses a long timeout so there's
+        time to tap 'Allow'; once paired, a short timeout keeps a sleeping TV
+        from stalling the scheduler thread.
+
+        The websocket is opened here, inside the retries, so a handshake the TV
+        interrupts (its screen going to sleep mid-connect, say) is tried again
+        like any other connect failure rather than failing the whole push."""
         timeout = CONNECT_TIMEOUT if os.path.exists(self.token_file) else PAIR_TIMEOUT
         for attempt in range(CONNECT_RETRIES + 1):
             if attempt and self.mac:
                 log.info("%s: Wake-on-LAN nudge before retry %d", self.host, attempt)
                 _wake_on_lan(self.mac)
                 time.sleep(WAKE_SETTLE)
-            tv = SamsungTVWS(host=self.host, port=8002, token_file=self.token_file,
-                             name=DEVICE_NAME, timeout=timeout)
-            art = None
+            art = TolerantArt(self.host, port=8002, token_file=self.token_file,
+                              name=DEVICE_NAME, timeout=timeout)
             try:
-                art = tv.art()
-                # supported() is a REST request - confirms the TV is reachable and
-                # Frame-capable (it does NOT open the art websocket).
+                # supported() is a REST request: the TV is reachable and Frame-capable.
                 if not art.supported():
                     log.warning("%s has no Art Mode - skipping", self.host)
-                    self._close(art, tv)
+                    self._close(art)
                     return None
-                return tv, art
+                art.open()
+                if art.news:
+                    log.info("%s: the TV said %s while connecting", self.host,
+                             ", ".join(dict.fromkeys(art.news)))
+                return art
+            except UnauthorizedError as exc:
+                self._close(art)
+                self._forget_pairing()
+                raise UnauthorizedError(
+                    f"{exc}. Allow it again: TV Settings > General > External Device "
+                    "Manager > Device Connection Manager > Device List, or accept the "
+                    "'Allow FrameGallery' prompt the next try brings up") from None
             except ResponseError:
-                self._close(art, tv)
+                self._close(art)
                 raise               # TV gave a definitive answer; retrying won't help
             except Exception as exc:
-                self._close(art, tv)
+                self._close(art)
                 if attempt == CONNECT_RETRIES:
                     raise
                 log.warning("%s: connect failed (%s); retrying in %.0fs",
@@ -168,9 +172,16 @@ class FrameTV:
                 time.sleep(CONNECT_BACKOFF)
         raise AssertionError("unreachable: the last attempt returns or raises")
 
+    def _forget_pairing(self) -> None:
+        """The TV refused our token: drop it, so the next try pairs afresh (with
+        the long timeout, and an 'Allow' prompt on the TV) instead of repeating
+        a token the TV has already said no to."""
+        with contextlib.suppress(OSError):
+            os.remove(self.token_file)
+
     @staticmethod
-    def _close(art, tv) -> None:
-        for obj in (art, tv):
+    def _close(*objs) -> None:
+        for obj in objs:
             if obj is not None:
                 with contextlib.suppress(Exception):
                     obj.close()

@@ -1,5 +1,13 @@
 # Changelog
 
+## REFRAMED Gallery 0.8.1 — 2026-11-28
+
+**Art reaches the TV again, and a silent TV can't freeze the app**: when the
+Frame's Art app stopped answering (Vetro's "MultiScreen" quick win had turned off
+a Samsung service it needs), changes hung for hours and blocked everything else.
+Every wait on the TV now ends on time, a change no TV took is retried in 15
+minutes, and the log says in words what the TV did.
+
 ## REFRAMED Gallery 0.8.0 — 2026-11-27
 
 **Keep every piece on the TV**: `library_size` `0` keeps all past art on the
