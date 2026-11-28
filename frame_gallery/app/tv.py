@@ -24,12 +24,12 @@ import socket
 import threading
 import time
 
+from artlink import TolerantArt
+
 # A TV-level rejection (e.g. an unsupported matte -> error -2) is definitive:
 # retrying the same call won't help, so we never retry it. A refused pairing
 # (UnauthorizedError) is definitive too, until someone allows the app again.
 from samsungtvws.exceptions import ResponseError, UnauthorizedError
-
-from artlink import TolerantArt
 
 log = logging.getLogger("frame-gallery.tv")
 

@@ -115,7 +115,7 @@ def test_standby_with_no_ready_says_so_in_words(tmp_path, tv_sends):
 
 def test_silence_after_connect_names_what_the_tv_did_say(tmp_path, tv_sends):
     tv_sends(CONNECT, {"event": "ms.channel.clientConnect", "data": {}})
-    with pytest.raises(artlink.ArtUnavailable, match="didn't get ready.*clientConnect"):
+    with pytest.raises(artlink.ArtUnavailable, match=r"didn't get ready.*clientConnect"):
         channel(tmp_path).open()
 
 

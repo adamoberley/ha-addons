@@ -17,6 +17,7 @@ why in words.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import socket
@@ -117,10 +118,8 @@ class TolerantArt(SamsungTVArt):
         for conn in (self.connection, self._opening):
             sock = getattr(conn, "sock", None)
             if sock is not None:
-                try:
+                with contextlib.suppress(OSError):
                     sock.shutdown(socket.SHUT_RDWR)
-                except OSError:
-                    pass
 
     def send_command(self, *args, **kwargs):
         """Every request restarts the answer clock; answers to it, and anything
